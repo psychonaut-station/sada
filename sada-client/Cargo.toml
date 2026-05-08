@@ -1,0 +1,12 @@
+[package]
+name = "sada-client"
+version = "0.1.0"
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sada-common = { path = "../sada-common" }
+tokio = { version = "1", features = ["rt", "net", "sync", "time"] }
+serde_json = "1"
