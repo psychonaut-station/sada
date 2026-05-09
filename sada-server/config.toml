@@ -1,0 +1,6 @@
+[server]
+listen = "0.0.0.0:3000"
+
+[webrtc]
+# IP address for WebRTC UDP sockets. If not set, auto-detects.
+# host_ip = "192.168.1.100"
