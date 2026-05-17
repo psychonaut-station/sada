@@ -13,7 +13,18 @@ use axum::{
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::{config::Config, session::Session};
+use crate::{
+    config::Config,
+    session::{Room, Session},
+};
+
+/// Shared application state for signaling handlers.
+pub struct AppState {
+    /// Server configuration.
+    pub config: Arc<Config>,
+    /// Room used to relay media between sessions.
+    pub room: Room,
+}
 
 /// Message exchanged over the signaling WebSocket.
 #[derive(Debug, Deserialize, Serialize)]
@@ -37,12 +48,12 @@ pub enum SignalMessage {
 }
 
 /// Upgrade an HTTP request to a signaling WebSocket.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(config): State<Arc<Config>>) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_signaling(socket, config))
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_signaling(socket, state))
 }
 
 /// Process signaling messages on an upgraded WebSocket.
-async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
+async fn handle_signaling(mut ws: WebSocket, state: Arc<AppState>) {
     info!("WebSocket client connected");
 
     while let Some(msg) = ws.next().await {
@@ -71,7 +82,7 @@ async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
             SignalMessage::Offer { sdp } => {
                 info!(bytes = sdp.len(), "received offer");
 
-                let (session, answer_sdp) = match Session::from_offer(&sdp, &config.webrtc).await {
+                let (session, answer_sdp) = match Session::from_offer(&sdp, &state.config.webrtc, &state.room).await {
                     Ok(result) => result,
                     Err(err) => {
                         error!(?err, "failed to create session from offer");
@@ -81,6 +92,7 @@ async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
 
                 let answer_msg = SignalMessage::Answer { sdp: answer_sdp };
                 let json = serde_json::to_string(&answer_msg).unwrap();
+
                 if let Err(err) = ws.send(Message::Text(json.into())).await {
                     error!(?err, "failed to send answer");
                     return;

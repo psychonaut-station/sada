@@ -20,15 +20,20 @@ pub struct AudioSink {
 impl AudioSink {
     /// Create a new audio sink.
     pub fn new() -> Self {
-        let dumper = match AudioDumper::create("audio_dump.wav") {
-            Ok(d) => {
-                info!("audio dumper: writing to audio_dump.wav");
-                Some(d)
-            },
-            Err(err) => {
-                warn!(?err, "audio dumper: disabled");
-                None
-            },
+        let dumper = if cfg!(feature = "audio_dump") {
+            let path = "audio_dump.wav";
+            match AudioDumper::create(path) {
+                Ok(d) => {
+                    info!(path, "audio dumper: writing to file");
+                    Some(d)
+                },
+                Err(err) => {
+                    warn!(?err, "audio dumper: disabled");
+                    None
+                },
+            }
+        } else {
+            None
         };
 
         Self {

@@ -6,6 +6,10 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+audio_dump = []
+
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true

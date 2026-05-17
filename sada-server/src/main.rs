@@ -15,7 +15,11 @@ use axum::{Router, routing::get};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
-use crate::{config::Config, signaling::ws_handler};
+use crate::{
+    config::Config,
+    session::Room,
+    signaling::{AppState, ws_handler},
+};
 
 /// Server entry point.
 #[tokio::main]
@@ -27,7 +31,12 @@ async fn main() -> Result<()> {
     let config = Arc::new(Config::load("config.toml")?);
     let addr = config.server.listen;
 
-    let app = Router::new().route("/ws", get(ws_handler)).with_state(config);
+    let state = Arc::new(AppState {
+        config,
+        room: Room::new(),
+    });
+
+    let app = Router::new().route("/ws", get(ws_handler)).with_state(state);
 
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "http server listening");
