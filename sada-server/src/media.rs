@@ -6,7 +6,6 @@ use anyhow::{Context as _, Result};
 use hound::{WavSpec, WavWriter};
 use opus::Channels;
 use str0m::media::MediaData;
-use tracing::{error, info, warn};
 
 /// Consumes incoming audio media frames.
 pub struct AudioSink {
@@ -86,7 +85,7 @@ impl AudioDumper {
             sample_format: hound::SampleFormat::Int,
         };
 
-        let writer = WavWriter::create(path.as_ref(), spec).context("failed to create WAV file")?;
+        let writer = WavWriter::create(path, spec).context("failed to create WAV file")?;
 
         Ok(Self {
             decoder,
@@ -97,7 +96,7 @@ impl AudioDumper {
 
     /// Decode one Opus packet and append its samples to the WAV file.
     fn write_frame(&mut self, opus_data: &[u8]) -> Result<()> {
-        let mut pcm_buf = [0i16; 5760];
+        let mut pcm_buf = [0; 5760];
 
         let samples = self
             .decoder
@@ -112,7 +111,7 @@ impl AudioDumper {
 
         if self.sample_count % 240_000 < samples as u64 {
             let secs = self.sample_count as f64 / 48000.0;
-            info!("audio dumper: {:.1}s of audio written", secs);
+            info!("audio dumper: {secs:.1}s of audio written");
         }
 
         Ok(())
@@ -123,8 +122,8 @@ impl Drop for AudioDumper {
     fn drop(&mut self) {
         let duration_secs = self.sample_count as f64 / 48000.0;
         info!(
-            "audio dumper: finalizing WAV ({:.1}s, {} samples)",
-            duration_secs, self.sample_count,
+            "audio dumper: finalizing WAV ({duration_secs:.1}s, {} samples)",
+            self.sample_count,
         );
         if let Err(e) = self.writer.flush() {
             error!("audio dumper: flush error: {e}");

@@ -2,7 +2,7 @@
 
 use std::{net::IpAddr, time::Instant};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use str0m::{
     Candidate,
     Event,
@@ -16,12 +16,11 @@ use str0m::{
 };
 use systemstat::{Platform, System};
 use tokio::{net::UdpSocket, select};
-use tracing::{debug, error, info, warn};
 
-use crate::media;
+use crate::media::AudioSink;
 
 /// Select the first usable non-loopback IPv4 address from the host.
-pub fn select_host_address() -> IpAddr {
+pub fn select_host_address() -> Result<IpAddr> {
     let system = System::new();
     let networks = system.networks().unwrap();
 
@@ -32,12 +31,12 @@ pub fn select_host_address() -> IpAddr {
                 && !v.is_link_local()
                 && !v.is_broadcast()
             {
-                return IpAddr::V4(v);
+                return Ok(IpAddr::V4(v));
             }
         }
     }
 
-    panic!("Found no usable network interface");
+    bail!("found no usable network interface");
 }
 
 /// Next action requested by the WebRTC polling loop.
@@ -65,13 +64,17 @@ impl Session {
 
         let mut rtc = RtcConfig::new().clear_codecs().enable_opus(true).build(Instant::now());
 
-        let host_ip = webrtc_config.host_ip.unwrap_or_else(select_host_address);
+        let host_ip = match webrtc_config.host_ip {
+            Some(ip) => ip,
+            None => select_host_address().context("failed to auto-detect host IP address")?,
+        };
         let socket = UdpSocket::bind((host_ip, 0))
             .await
             .context("failed to bind UDP socket")?;
-        let addr = socket.local_addr().expect("a local socket address");
+        let addr = socket.local_addr().expect("failed to get local socket address");
         let candidate = Candidate::host(addr, "udp").context("failed to create host candidate")?;
-        rtc.add_local_candidate(candidate).unwrap();
+        rtc.add_local_candidate(candidate)
+            .context("failed to add local candidate")?;
 
         let answer = rtc.sdp_api().accept_offer(offer).context("failed to accept offer")?;
 
@@ -84,8 +87,9 @@ impl Session {
     pub async fn run(mut self) {
         info!("str0m run loop started");
 
-        let mut audio = media::AudioSink::new();
-        let mut buf = vec![0u8; 65535];
+        let mut audio = AudioSink::new();
+        let mut buf = vec![0; 65535];
+
         loop {
             let timeout = match self.poll(&mut audio).await {
                 Loop::Timeout(t) => t,
@@ -100,20 +104,17 @@ impl Session {
                 continue;
             }
 
-            buf.resize(65535, 0);
-
             select! {
                 result = self.socket.recv_from(&mut buf) => {
                     match result {
                         Ok((n, source)) => {
-                            buf.truncate(n);
                             let input = Input::Receive(
                                 Instant::now(),
                                 Receive {
                                     proto: Protocol::Udp,
                                     source,
                                     destination: self.socket.local_addr().unwrap(),
-                                    contents: buf.as_slice().try_into().unwrap(),
+                                    contents: buf[..n].try_into().unwrap(),
                                 },
                             );
                             if let Err(e) = self.rtc.handle_input(input) {
@@ -135,7 +136,7 @@ impl Session {
     }
 
     /// Poll str0m once and perform any requested I/O.
-    async fn poll(&mut self, audio: &mut media::AudioSink) -> Loop {
+    async fn poll(&mut self, audio: &mut AudioSink) -> Loop {
         match self.rtc.poll_output() {
             Ok(Output::Timeout(v)) => Loop::Timeout(v),
             Ok(Output::Transmit(v)) => {
@@ -153,7 +154,7 @@ impl Session {
     }
 
     /// Handle a single str0m event.
-    fn handle_event(&mut self, event: Event, audio: &mut media::AudioSink) -> Loop {
+    fn handle_event(&mut self, event: Event, audio: &mut AudioSink) -> Loop {
         match &event {
             Event::Connected => {
                 info!("WebRTC peer connected");

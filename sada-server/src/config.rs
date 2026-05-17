@@ -1,6 +1,9 @@
 //! Configuration loading and schema definitions.
 
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    fs,
+    net::{IpAddr, SocketAddr},
+};
 
 use anyhow::Context;
 use serde::Deserialize;
@@ -32,8 +35,8 @@ pub struct WebRtcConfig {
 impl Config {
     /// Load configuration from a TOML file at `path`.
     pub fn load(path: &str) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path).with_context(|| format!("failed to read config from {path}"))?;
-        let config: Config = toml::from_str(&content).with_context(|| format!("failed to parse config from {path}"))?;
+        let content = fs::read_to_string(path).with_context(|| format!("failed to read config from {path}"))?;
+        let config = toml::from_str(&content).with_context(|| format!("failed to parse config from {path}"))?;
         Ok(config)
     }
 }

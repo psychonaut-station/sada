@@ -2,13 +2,16 @@
 
 use std::sync::Arc;
 
-use axum::extract::{
-    State,
-    ws::{Message, WebSocket},
+use axum::{
+    extract::{
+        State,
+        WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
+    response::IntoResponse,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
 
 use crate::{config::Config, session::Session};
 
@@ -34,10 +37,8 @@ pub enum SignalMessage {
 }
 
 /// Upgrade an HTTP request to a signaling WebSocket.
-pub async fn ws_handler(
-    ws: axum::extract::WebSocketUpgrade, State(config): State<Arc<Config>>,
-) -> impl axum::response::IntoResponse {
-    ws.on_upgrade(move |socket| handle_signaling(socket, config))
+pub async fn ws_handler(ws: WebSocketUpgrade, State(config): State<Arc<Config>>) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_signaling(socket, config))
 }
 
 /// Process signaling messages on an upgraded WebSocket.
@@ -58,7 +59,7 @@ async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
             _ => continue,
         };
 
-        let signal: SignalMessage = match serde_json::from_str(&msg) {
+        let signal = match serde_json::from_str(&msg) {
             Ok(s) => s,
             Err(e) => {
                 warn!("invalid signaling message: {e}");
