@@ -76,7 +76,6 @@ export class WebRTCManager {
     hangup(): void {
         this.localStream?.getTracks().forEach((t) => t.stop());
         this.localStream = null;
-        this.pc.getSenders().forEach((s) => s.track && s.track.stop());
         try {
             this.pc.close();
         } catch {}
