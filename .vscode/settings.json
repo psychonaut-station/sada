@@ -10,10 +10,10 @@
     "rust-analyzer.check.overrideCommand": null,
     // Appends the directory name to mod.rs files to disambiguate them in the editor.
     "workbench.editor.customLabels.patterns": {
-		"**/mod.rs": "${dirname}/mod.rs"
-	},
+        "**/mod.rs": "${dirname}/mod.rs"
+    },
     // Sets rust-analyzer as the default formatter for Rust files.
-	"[rust]": {
-		"editor.defaultFormatter": "rust-lang.rust-analyzer"
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
 }
