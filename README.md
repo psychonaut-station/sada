@@ -6,10 +6,9 @@ Voice chat integration for Space Station 13.
 
 This repository includes a `shell.nix` for a reproducible development shell.
 
-To set up the nix environment, add the following channels:
+To set up the nix environment, add the following channel:
 
 ```sh
-nix-channel --add https://nixos.org/channels/nixos-unstable nixpkgs # In case you don't have it already
 nix-channel --add https://github.com/oxalica/rust-overlay/archive/master.tar.gz rust-overlay
 nix-channel --update
 ```
