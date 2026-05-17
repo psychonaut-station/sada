@@ -1,5 +1,5 @@
 import { css, html, LitElement, nothing, type TemplateResult } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, query, state } from "lit/decorators.js";
 import { WebRTCManager } from "./webrtc.js";
 import { SignalingClient, type ServerMessage } from "./signaling.js";
 import config from "./config.json";
@@ -125,10 +125,13 @@ export class Sada extends LitElement {
     private signalling?: SignalingClient;
     private rtc?: WebRTCManager;
 
+    @query("audio.remote-audio")
+    private remoteAudio?: HTMLAudioElement;
+
     private async tryConnect(): Promise<void> {
         this.connectionState = "connecting";
 
-        const signaling = new SignalingClient(config.signalingUrl, "", {
+        const signaling = new SignalingClient(`ws://${location.hostname}:${config.signalingPort}/ws`, "", {
             onServerMessage: (msg) => this.onMessage(msg),
             onOpen: () => console.log("signaling open"),
             onClose: () => {
@@ -150,7 +153,7 @@ export class Sada extends LitElement {
         }
 
         const rtc = new WebRTCManager(signaling, {
-            onRemoteTrack: (s) => console.log("remote track", s),
+            onRemoteTrack: (stream) => this.attachRemoteStream(stream),
             onConnectionState: (state) => {
                 if (state === "connected") {
                     this.connectionState = "connected";
@@ -169,6 +172,18 @@ export class Sada extends LitElement {
         }
     }
 
+    private attachRemoteStream(stream: MediaStream): void {
+        if (!this.remoteAudio) {
+            return;
+        }
+
+        if (this.remoteAudio.srcObject !== stream) {
+            this.remoteAudio.srcObject = stream;
+        }
+
+        this.remoteAudio.play().catch((e) => console.error("remote audio play failed", e));
+    }
+
     private onMessage(message: ServerMessage): void {
         switch (message.type) {
             case "answer":
@@ -184,6 +199,9 @@ export class Sada extends LitElement {
         this.rtc = undefined;
         this.signalling?.close();
         this.signalling = undefined;
+        if (this.remoteAudio) {
+            this.remoteAudio.srcObject = null;
+        }
         this.muted = false;
         this.connectionState = "disconnected";
     }
@@ -196,6 +214,7 @@ export class Sada extends LitElement {
     protected render(): TemplateResult {
         return html`
             <div class="container">
+                <audio class="remote-audio" autoplay playsinline></audio>
                 <h1>sada</h1>
 
                 <span class="status status-${this.connectionState}">

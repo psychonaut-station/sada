@@ -1,28 +1,39 @@
+//! Media frame handling.
+
 use std::{fs::File, io::BufWriter, path::Path};
 
 use anyhow::{Context as _, Result};
 use hound::{WavSpec, WavWriter};
 use opus::Channels;
 use str0m::media::MediaData;
-use tracing::{error, info, warn};
 
+/// Consumes incoming audio media frames.
 pub struct AudioSink {
+    /// Number of media frames observed.
     frame_count: u64,
+    /// Total number of encoded bytes observed.
     byte_count: u64,
+    /// Optional WAV dumper used for local debugging.
     dumper: Option<AudioDumper>,
 }
 
 impl AudioSink {
+    /// Create a new audio sink.
     pub fn new() -> Self {
-        let dumper = match AudioDumper::create("audio_dump.wav") {
-            Ok(d) => {
-                info!("audio dumper: writing to audio_dump.wav");
-                Some(d)
-            },
-            Err(e) => {
-                warn!("audio dumper: disabled ({e:#})");
-                None
-            },
+        let dumper = if cfg!(feature = "audio_dump") {
+            let path = "audio_dump.wav";
+            match AudioDumper::create(path) {
+                Ok(d) => {
+                    info!(path, "audio dumper: writing to file");
+                    Some(d)
+                },
+                Err(err) => {
+                    warn!(?err, "audio dumper: disabled");
+                    None
+                },
+            }
+        } else {
+            None
         };
 
         Self {
@@ -32,38 +43,43 @@ impl AudioSink {
         }
     }
 
+    /// Process one encoded media frame.
     pub fn handle_frame(&mut self, data: &MediaData) {
         self.frame_count += 1;
         self.byte_count += data.data.len() as u64;
 
-        if self.frame_count <= 5 || self.frame_count % 500 == 0 {
+        if self.frame_count <= 5 || self.frame_count.is_multiple_of(500) {
             info!(
-                "audio frame #{}: {} bytes, mid={:?} pt={:?} (total {} bytes)",
-                self.frame_count,
-                data.data.len(),
-                data.mid,
-                data.pt,
-                self.byte_count,
+                frame = self.frame_count,
+                bytes = data.data.len(),
+                mid = ?data.mid,
+                pt = ?data.pt,
+                total_bytes = self.byte_count,
+                "audio frame",
             );
         }
 
-        if let Some(dumper) = &mut self.dumper {
-            if let Err(e) = dumper.write_frame(&data.data) {
-                if self.frame_count <= 3 || self.frame_count % 100 == 0 {
-                    warn!("audio dumper decode error: {e}");
-                }
-            }
+        if let Some(dumper) = &mut self.dumper
+            && let Err(err) = dumper.write_frame(&data.data)
+            && (self.frame_count <= 3 || self.frame_count.is_multiple_of(100))
+        {
+            warn!(?err, "audio dumper: decode error");
         }
     }
 }
 
+/// Decodes Opus frames and writes the resulting PCM samples to a WAV file.
 struct AudioDumper {
+    /// Opus decoder configured for the negotiated audio stream.
     decoder: opus::Decoder,
+    /// WAV writer for decoded samples.
     writer: WavWriter<BufWriter<File>>,
+    /// Number of decoded PCM samples written.
     sample_count: u64,
 }
 
 impl AudioDumper {
+    /// Create a dumper that writes to `path`.
     fn create(path: impl AsRef<Path>) -> Result<Self> {
         let decoder = opus::Decoder::new(48000, Channels::Mono).context("failed to create Opus decoder")?;
 
@@ -74,7 +90,7 @@ impl AudioDumper {
             sample_format: hound::SampleFormat::Int,
         };
 
-        let writer = WavWriter::create(path.as_ref(), spec).context("failed to create WAV file")?;
+        let writer = WavWriter::create(path, spec).context("failed to create WAV file")?;
 
         Ok(Self {
             decoder,
@@ -83,8 +99,9 @@ impl AudioDumper {
         })
     }
 
+    /// Decode one Opus packet and append its samples to the WAV file.
     fn write_frame(&mut self, opus_data: &[u8]) -> Result<()> {
-        let mut pcm_buf = [0i16; 5760];
+        let mut pcm_buf = [0; 5760];
 
         let samples = self
             .decoder
@@ -99,7 +116,7 @@ impl AudioDumper {
 
         if self.sample_count % 240_000 < samples as u64 {
             let secs = self.sample_count as f64 / 48000.0;
-            info!("audio dumper: {:.1}s of audio written", secs);
+            info!(duration_secs = secs, "audio dumper: audio written");
         }
 
         Ok(())
@@ -108,13 +125,14 @@ impl AudioDumper {
 
 impl Drop for AudioDumper {
     fn drop(&mut self) {
-        let duration_secs = self.sample_count as f64 / 48000.0;
+        let secs = self.sample_count as f64 / 48000.0;
         info!(
-            "audio dumper: finalizing WAV ({:.1}s, {} samples)",
-            duration_secs, self.sample_count,
+            duration_secs = secs,
+            samples = self.sample_count,
+            "audio dumper: finalizing WAV",
         );
-        if let Err(e) = self.writer.flush() {
-            error!("audio dumper: flush error: {e}");
+        if let Err(err) = self.writer.flush() {
+            error!(?err, "audio dumper: flush error");
         }
     }
 }

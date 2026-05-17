@@ -1,32 +1,59 @@
+//! WebSocket signaling endpoint for exchanging SDP messages.
+
 use std::sync::Arc;
 
-use axum::extract::{State, ws::{Message, WebSocket}};
+use axum::{
+    extract::{
+        State,
+        WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
+    response::IntoResponse,
+};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
 
-use crate::config::Config;
-use crate::session::Session;
+use crate::{
+    config::Config,
+    session::{Room, Session},
+};
 
+/// Shared application state for signaling handlers.
+pub struct AppState {
+    /// Server configuration.
+    pub config: Arc<Config>,
+    /// Room used to relay media between sessions.
+    pub room: Room,
+}
+
+/// Message exchanged over the signaling WebSocket.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum SignalMessage {
+    /// SDP offer sent by a WebRTC client.
     #[serde(rename = "offer")]
-    Offer { sdp: String },
+    Offer {
+        /// Session description payload.
+        sdp: String,
+    },
+    /// SDP answer sent after accepting an offer.
     #[serde(rename = "answer")]
-    Answer { sdp: String },
+    Answer {
+        /// Session description payload.
+        sdp: String,
+    },
+    /// Request to close the signaling session.
     #[serde(rename = "close")]
     Close,
 }
 
-pub async fn ws_handler(
-    ws: axum::extract::WebSocketUpgrade,
-    State(config): State<Arc<Config>>,
-) -> impl axum::response::IntoResponse {
-    ws.on_upgrade(move |socket| handle_signaling(socket, config))
+/// Upgrade an HTTP request to a signaling WebSocket.
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_signaling(socket, state))
 }
 
-async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
+/// Process signaling messages on an upgraded WebSocket.
+async fn handle_signaling(mut ws: WebSocket, state: Arc<AppState>) {
     info!("WebSocket client connected");
 
     while let Some(msg) = ws.next().await {
@@ -36,37 +63,38 @@ async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
                 info!("WebSocket closed by client");
                 break;
             },
-            Err(e) => {
-                warn!("WebSocket read error: {e}");
+            Err(err) => {
+                warn!(?err, "WebSocket read error");
                 break;
             },
             _ => continue,
         };
 
-        let signal: SignalMessage = match serde_json::from_str(&msg) {
+        let signal = match serde_json::from_str(&msg) {
             Ok(s) => s,
-            Err(e) => {
-                warn!("invalid signaling message: {e}");
+            Err(err) => {
+                warn!(?err, "invalid signaling message");
                 continue;
             },
         };
 
         match signal {
             SignalMessage::Offer { sdp } => {
-                info!("received offer ({} bytes)", sdp.len());
+                info!(bytes = sdp.len(), "received offer");
 
-                let (session, answer_sdp) = match Session::from_offer(&sdp, &config.webrtc).await {
+                let (session, answer_sdp) = match Session::from_offer(&sdp, &state.config.webrtc, &state.room).await {
                     Ok(result) => result,
-                    Err(e) => {
-                        error!("{e:#}");
+                    Err(err) => {
+                        error!(?err, "failed to create session from offer");
                         continue;
                     },
                 };
 
                 let answer_msg = SignalMessage::Answer { sdp: answer_sdp };
                 let json = serde_json::to_string(&answer_msg).unwrap();
-                if let Err(e) = ws.send(Message::Text(json.into())).await {
-                    error!("failed to send answer: {e}");
+
+                if let Err(err) = ws.send(Message::Text(json.into())).await {
+                    error!(?err, "failed to send answer");
                     return;
                 }
 

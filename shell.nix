@@ -14,5 +14,6 @@ pkgs.mkShell {
     pkgs.nodejs
     pkgs.opus
     pkgs.cmake
+    pkgs.openssl
   ];
 }

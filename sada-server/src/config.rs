@@ -1,38 +1,42 @@
-use std::net::{IpAddr, SocketAddr};
+//! Configuration loading and schema definitions.
+
+use std::{
+    fs,
+    net::{IpAddr, SocketAddr},
+};
 
 use anyhow::Context;
 use serde::Deserialize;
 
+/// Complete server configuration loaded from TOML.
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    /// Server listener settings.
     pub server: ServerConfig,
+    /// WebRTC transport settings.
     pub webrtc: WebRtcConfig,
 }
 
+/// HTTP server configuration.
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
+    /// Socket address the server listens on.
     pub listen: SocketAddr,
 }
 
-#[derive(Debug, Deserialize)]
+/// WebRTC transport configuration.
+#[derive(Default, Debug, Deserialize)]
 #[serde(default)]
 pub struct WebRtcConfig {
     /// IP address for WebRTC UDP sockets. If None, auto-detects.
     pub host_ip: Option<IpAddr>,
 }
 
-impl Default for WebRtcConfig {
-    fn default() -> Self {
-        Self { host_ip: None }
-    }
-}
-
 impl Config {
+    /// Load configuration from a TOML file at `path`.
     pub fn load(path: &str) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read config from {path}"))?;
-        let config: Config = toml::from_str(&content)
-            .with_context(|| format!("failed to parse config from {path}"))?;
+        let content = fs::read_to_string(path).with_context(|| format!("failed to read config from {path}"))?;
+        let config = toml::from_str(&content).with_context(|| format!("failed to parse config from {path}"))?;
         Ok(config)
     }
 }

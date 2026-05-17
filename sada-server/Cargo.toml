@@ -1,20 +1,27 @@
 [package]
 name = "sada-server"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
+[features]
+default = []
+audio_dump = []
+
 [dependencies]
-sada-common = { path = "../sada-common" }
-tokio = { version = "1", features = ["full"] }
-str0m = "0.19"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-axum = { version = "0.8", features = ["ws"] }
-futures-util = "0.3"
-anyhow = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opus = "0.3"
-hound = "3.5"
-systemstat = "0.2.2"
-toml = "0.8"
+anyhow.workspace = true
+axum.workspace = true
+futures-util.workspace = true
+hound.workspace = true
+opus.workspace = true
+sada-common.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+str0m.workspace = true
+systemstat.workspace = true
+tokio = { workspace = true, features = ["full"] }
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
