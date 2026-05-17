@@ -1,6 +1,6 @@
 //! WebRTC session setup and event loop handling.
 
-use std::{net::IpAddr, time::Instant};
+use std::{net::IpAddr, sync::OnceLock, time::Instant};
 
 use anyhow::{Context as _, Result, bail};
 use str0m::{
@@ -17,10 +17,10 @@ use str0m::{
 use systemstat::{Platform, System};
 use tokio::{net::UdpSocket, select};
 
-use crate::media::AudioSink;
+use crate::{config::WebRtcConfig, media::AudioSink};
 
 /// Select the first usable non-loopback IPv4 address from the host.
-pub fn select_host_address() -> Result<IpAddr> {
+fn select_host_address() -> Result<IpAddr> {
     let system = System::new();
     let networks = system.networks().unwrap();
 
@@ -37,6 +37,22 @@ pub fn select_host_address() -> Result<IpAddr> {
     }
 
     bail!("found no usable network interface");
+}
+
+/// Select and cache the automatically detected host IP address.
+fn auto_host_address() -> Result<IpAddr> {
+    static ADDR: OnceLock<IpAddr> = OnceLock::new();
+
+    match ADDR.get() {
+        Some(addr) => Ok(*addr),
+        None => {
+            let addr = select_host_address()?;
+            match ADDR.set(addr) {
+                Ok(()) => Ok(addr),
+                Err(addr) => Ok(addr),
+            }
+        },
+    }
 }
 
 /// Next action requested by the WebRTC polling loop.
@@ -59,14 +75,14 @@ pub struct Session {
 
 impl Session {
     /// Create a session from a remote SDP offer and return the SDP answer.
-    pub async fn from_offer(offer_sdp: &str, webrtc_config: &crate::config::WebRtcConfig) -> Result<(Self, String)> {
+    pub async fn from_offer(offer_sdp: &str, webrtc_config: &WebRtcConfig) -> Result<(Self, String)> {
         let offer = SdpOffer::from_sdp_string(offer_sdp).context("failed to parse SDP offer")?;
 
         let mut rtc = RtcConfig::new().clear_codecs().enable_opus(true).build(Instant::now());
 
         let host_ip = match webrtc_config.host_ip {
             Some(ip) => ip,
-            None => select_host_address().context("failed to auto-detect host IP address")?,
+            None => auto_host_address().context("failed to auto-detect host IP address")?,
         };
         let socket = UdpSocket::bind((host_ip, 0))
             .await
