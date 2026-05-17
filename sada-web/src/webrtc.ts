@@ -17,7 +17,7 @@ export class WebRTCManager {
         this.signaling = signaling;
         this.events = events;
         this.pc = new RTCPeerConnection({
-            iceServers: iceServers ?? config.iceServers.map(url => ({ urls: url })),
+            iceServers: iceServers ?? config.iceServers.map((url) => ({ urls: url })),
         });
         this.remoteStream = new MediaStream();
 
@@ -47,15 +47,22 @@ export class WebRTCManager {
         const offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
 
-        if (this.pc.iceGatheringState !== "complete") {
-            await new Promise<void>((resolve) => {
-                const done = () => {
-                    this.pc.removeEventListener("icegatheringstatechange", done);
+        // Wait for ICE gathering to finish so all candidates are bundled
+        // in the offer SDP. The check guards against the rare case where
+        // gathering is already complete before we attach the listener.
+        await new Promise<void>((resolve) => {
+            if (this.pc.iceGatheringState === "complete") {
+                resolve();
+                return;
+            }
+            const handler = () => {
+                if (this.pc.iceGatheringState === "complete") {
+                    this.pc.removeEventListener("icegatheringstatechange", handler);
                     resolve();
-                };
-                this.pc.addEventListener("icegatheringstatechange", done);
-            });
-        }
+                }
+            };
+            this.pc.addEventListener("icegatheringstatechange", handler);
+        });
 
         this.signaling.send({ type: "offer", sdp: this.pc.localDescription?.sdp ?? "" });
     }
@@ -76,7 +83,6 @@ export class WebRTCManager {
     hangup(): void {
         this.localStream?.getTracks().forEach((t) => t.stop());
         this.localStream = null;
-        this.pc.getSenders().forEach((s) => s.track && s.track.stop());
         try {
             this.pc.close();
         } catch {}

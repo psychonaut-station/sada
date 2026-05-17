@@ -1,12 +1,9 @@
 export type ClientMessage =
     | { type: "offer"; sdp: string }
-    | { type: "ice"; candidate: string }
     | { type: "close" };
 
 export type ServerMessage =
-    | { type: "offer"; call_id: string; sdp: string }
     | { type: "answer"; sdp: string }
-    | { type: "ice"; candidate: string }
     | { type: "close" };
 
 export type SignalingHandlers = {
@@ -89,21 +86,10 @@ export class SignalingClient {
             typeof obj[key] === "string" ? (obj[key] as string) : undefined;
 
         switch (str("type")) {
-            case "offer": {
-                const call_id = str("call_id");
-                const sdp = str("sdp");
-                if (!call_id || !sdp) return null;
-                return { type: "offer", call_id, sdp };
-            }
             case "answer": {
                 const sdp = str("sdp");
                 if (!sdp) return null;
                 return { type: "answer", sdp };
-            }
-            case "ice": {
-                const candidate = str("candidate");
-                if (!candidate) return null;
-                return { type: "ice", candidate };
             }
             case "close":
                 return { type: "close" };
