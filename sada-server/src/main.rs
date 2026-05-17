@@ -28,7 +28,8 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env().add_directive("sada_server=debug".parse()?))
         .init();
 
-    let config = Arc::new(Config::load("config.toml")?);
+    let path = std::env::var("SADA_CONFIG").unwrap_or_else(|_| "config.toml".into());
+    let config = Arc::new(Config::load(&path)?);
     let addr = config.server.listen;
 
     let state = Arc::new(AppState {
