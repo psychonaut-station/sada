@@ -1,3 +1,10 @@
+//! Main VC and signaling server binary.
+
+mod config;
+mod media;
+mod session;
+mod signaling;
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -6,11 +13,7 @@ use tracing::info;
 
 use crate::signaling::ws_handler;
 
-mod config;
-mod media;
-mod session;
-mod signaling;
-
+/// Server entry point.
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -20,9 +23,7 @@ async fn main() -> Result<()> {
     let config = Arc::new(config::Config::load("config.toml")?);
     let addr = config.server.listen;
 
-    let app = Router::new()
-        .route("/ws", get(ws_handler))
-        .with_state(config);
+    let app = Router::new().route("/ws", get(ws_handler)).with_state(config);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!("listening on {addr}");

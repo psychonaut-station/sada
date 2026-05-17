@@ -1,3 +1,5 @@
+//! WebRTC session setup and event loop handling.
+
 use std::{net::IpAddr, time::Instant};
 
 use anyhow::{Context as _, Result};
@@ -18,16 +20,19 @@ use tracing::{debug, error, info, warn};
 
 use crate::media;
 
+/// Select the first usable non-loopback IPv4 address from the host.
 pub fn select_host_address() -> IpAddr {
     let system = System::new();
     let networks = system.networks().unwrap();
 
     for net in networks.values() {
         for n in &net.addrs {
-            if let systemstat::IpAddr::V4(v) = n.addr {
-                if !v.is_loopback() && !v.is_link_local() && !v.is_broadcast() {
-                    return IpAddr::V4(v);
-                }
+            if let systemstat::IpAddr::V4(v) = n.addr
+                && !v.is_loopback()
+                && !v.is_link_local()
+                && !v.is_broadcast()
+            {
+                return IpAddr::V4(v);
             }
         }
     }
@@ -35,18 +40,26 @@ pub fn select_host_address() -> IpAddr {
     panic!("Found no usable network interface");
 }
 
+/// Next action requested by the WebRTC polling loop.
 enum Loop {
+    /// Wait until the given instant before polling again.
     Timeout(Instant),
+    /// Continue polling immediately.
     Continue,
+    /// Stop the session loop.
     Done,
 }
 
+/// A single WebRTC session backed by one UDP socket.
 pub struct Session {
+    /// WebRTC instance.
     rtc: Rtc,
+    /// UDP socket used for ICE and RTP traffic.
     socket: UdpSocket,
 }
 
 impl Session {
+    /// Create a session from a remote SDP offer and return the SDP answer.
     pub async fn from_offer(offer_sdp: &str, webrtc_config: &crate::config::WebRtcConfig) -> Result<(Self, String)> {
         let offer = SdpOffer::from_sdp_string(offer_sdp).context("failed to parse SDP offer")?;
 
@@ -67,6 +80,7 @@ impl Session {
         Ok((Self { rtc, socket }, answer_sdp))
     }
 
+    /// Run the session event loop until the peer disconnects or an error occurs.
     pub async fn run(mut self) {
         info!("str0m run loop started");
 
@@ -120,6 +134,7 @@ impl Session {
         }
     }
 
+    /// Poll str0m once and perform any requested I/O.
     async fn poll(&mut self, audio: &mut media::AudioSink) -> Loop {
         match self.rtc.poll_output() {
             Ok(Output::Timeout(v)) => Loop::Timeout(v),
@@ -137,6 +152,7 @@ impl Session {
         }
     }
 
+    /// Handle a single str0m event.
     fn handle_event(&mut self, event: Event, audio: &mut media::AudioSink) -> Loop {
         match &event {
             Event::Connected => {

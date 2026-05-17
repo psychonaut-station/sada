@@ -1,31 +1,46 @@
+//! WebSocket signaling endpoint for exchanging SDP messages.
+
 use std::sync::Arc;
 
-use axum::extract::{State, ws::{Message, WebSocket}};
+use axum::extract::{
+    State,
+    ws::{Message, WebSocket},
+};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use crate::config::Config;
-use crate::session::Session;
+use crate::{config::Config, session::Session};
 
+/// Message exchanged over the signaling WebSocket.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum SignalMessage {
+    /// SDP offer sent by a WebRTC client.
     #[serde(rename = "offer")]
-    Offer { sdp: String },
+    Offer {
+        /// Session description payload.
+        sdp: String,
+    },
+    /// SDP answer sent after accepting an offer.
     #[serde(rename = "answer")]
-    Answer { sdp: String },
+    Answer {
+        /// Session description payload.
+        sdp: String,
+    },
+    /// Request to close the signaling session.
     #[serde(rename = "close")]
     Close,
 }
 
+/// Upgrade an HTTP request to a signaling WebSocket.
 pub async fn ws_handler(
-    ws: axum::extract::WebSocketUpgrade,
-    State(config): State<Arc<Config>>,
+    ws: axum::extract::WebSocketUpgrade, State(config): State<Arc<Config>>,
 ) -> impl axum::response::IntoResponse {
     ws.on_upgrade(move |socket| handle_signaling(socket, config))
 }
 
+/// Process signaling messages on an upgraded WebSocket.
 async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
     info!("WebSocket client connected");
 
