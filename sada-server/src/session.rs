@@ -117,13 +117,13 @@ impl Session {
                                     contents: buf[..n].try_into().unwrap(),
                                 },
                             );
-                            if let Err(e) = self.rtc.handle_input(input) {
-                                error!("str0m handle_input error: {e}");
+                            if let Err(err) = self.rtc.handle_input(input) {
+                                error!(?err, "str0m handle_input error");
                                 return;
                             }
                         }
-                        Err(e) => {
-                            error!("UDP recv error: {e}");
+                        Err(err) => {
+                            error!(?err, "UDP recv error");
                             return;
                         }
                     }
@@ -140,14 +140,14 @@ impl Session {
         match self.rtc.poll_output() {
             Ok(Output::Timeout(v)) => Loop::Timeout(v),
             Ok(Output::Transmit(v)) => {
-                if let Err(e) = self.socket.send_to(&v.contents, v.destination).await {
-                    warn!("UDP send error: {e}");
+                if let Err(err) = self.socket.send_to(&v.contents, v.destination).await {
+                    warn!(?err, "UDP send error");
                 }
                 Loop::Continue
             },
             Ok(Output::Event(event)) => self.handle_event(event, audio),
-            Err(e) => {
-                error!("str0m poll_output error: {e}");
+            Err(err) => {
+                error!(?err, "str0m poll_output error");
                 Loop::Done
             },
         }
@@ -164,17 +164,15 @@ impl Session {
                 return Loop::Done;
             },
             Event::IceConnectionStateChange(state) => {
-                info!("ICE connection state: {state:?}");
+                info!(?state, "ICE connection state change");
             },
             Event::MediaAdded(ma) => {
-                info!("media added: mid={:?} kind={:?}", ma.mid, ma.kind);
+                info!(mid = ?ma.mid, kind = ?ma.kind, "media added");
             },
             Event::MediaData(data) => {
                 audio.handle_frame(data);
             },
-            _ => {
-                debug!("event: {event:?}");
-            },
+            _ => debug!(?event, "unhandled event"),
         }
         Loop::Continue
     }

@@ -52,8 +52,8 @@ async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
                 info!("WebSocket closed by client");
                 break;
             },
-            Err(e) => {
-                warn!("WebSocket read error: {e}");
+            Err(err) => {
+                warn!(?err, "WebSocket read error");
                 break;
             },
             _ => continue,
@@ -61,28 +61,28 @@ async fn handle_signaling(mut ws: WebSocket, config: Arc<Config>) {
 
         let signal = match serde_json::from_str(&msg) {
             Ok(s) => s,
-            Err(e) => {
-                warn!("invalid signaling message: {e}");
+            Err(err) => {
+                warn!(?err, "invalid signaling message");
                 continue;
             },
         };
 
         match signal {
             SignalMessage::Offer { sdp } => {
-                info!("received offer ({} bytes)", sdp.len());
+                info!(bytes = sdp.len(), "received offer");
 
                 let (session, answer_sdp) = match Session::from_offer(&sdp, &config.webrtc).await {
                     Ok(result) => result,
-                    Err(e) => {
-                        error!("{e:#}");
+                    Err(err) => {
+                        error!(?err, "failed to create session from offer");
                         continue;
                     },
                 };
 
                 let answer_msg = SignalMessage::Answer { sdp: answer_sdp };
                 let json = serde_json::to_string(&answer_msg).unwrap();
-                if let Err(e) = ws.send(Message::Text(json.into())).await {
-                    error!("failed to send answer: {e}");
+                if let Err(err) = ws.send(Message::Text(json.into())).await {
+                    error!(?err, "failed to send answer");
                     return;
                 }
 

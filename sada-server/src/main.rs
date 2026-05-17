@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
     let app = Router::new().route("/ws", get(ws_handler)).with_state(config);
 
     let listener = TcpListener::bind(addr).await?;
-    info!("listening on {addr}");
+    info!(%addr, "http server listening");
 
     axum::serve(listener, app).await?;
 

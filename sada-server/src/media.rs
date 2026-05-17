@@ -25,8 +25,8 @@ impl AudioSink {
                 info!("audio dumper: writing to audio_dump.wav");
                 Some(d)
             },
-            Err(e) => {
-                warn!("audio dumper: disabled ({e:#})");
+            Err(err) => {
+                warn!(?err, "audio dumper: disabled");
                 None
             },
         };
@@ -45,20 +45,20 @@ impl AudioSink {
 
         if self.frame_count <= 5 || self.frame_count.is_multiple_of(500) {
             info!(
-                "audio frame #{}: {} bytes, mid={:?} pt={:?} (total {} bytes)",
-                self.frame_count,
-                data.data.len(),
-                data.mid,
-                data.pt,
-                self.byte_count,
+                frame = self.frame_count,
+                bytes = data.data.len(),
+                mid = ?data.mid,
+                pt = ?data.pt,
+                total_bytes = self.byte_count,
+                "audio frame",
             );
         }
 
         if let Some(dumper) = &mut self.dumper
-            && let Err(e) = dumper.write_frame(&data.data)
+            && let Err(err) = dumper.write_frame(&data.data)
             && (self.frame_count <= 3 || self.frame_count.is_multiple_of(100))
         {
-            warn!("audio dumper decode error: {e}");
+            warn!(?err, "audio dumper: decode error");
         }
     }
 }
@@ -111,7 +111,7 @@ impl AudioDumper {
 
         if self.sample_count % 240_000 < samples as u64 {
             let secs = self.sample_count as f64 / 48000.0;
-            info!("audio dumper: {secs:.1}s of audio written");
+            info!(duration_secs = secs, "audio dumper: audio written");
         }
 
         Ok(())
@@ -120,13 +120,14 @@ impl AudioDumper {
 
 impl Drop for AudioDumper {
     fn drop(&mut self) {
-        let duration_secs = self.sample_count as f64 / 48000.0;
+        let secs = self.sample_count as f64 / 48000.0;
         info!(
-            "audio dumper: finalizing WAV ({duration_secs:.1}s, {} samples)",
-            self.sample_count,
+            duration_secs = secs,
+            samples = self.sample_count,
+            "audio dumper: finalizing WAV",
         );
-        if let Err(e) = self.writer.flush() {
-            error!("audio dumper: flush error: {e}");
+        if let Err(err) = self.writer.flush() {
+            error!(?err, "audio dumper: flush error");
         }
     }
 }
