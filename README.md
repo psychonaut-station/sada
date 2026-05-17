@@ -1,14 +1,19 @@
 # sada
+
 Voice chat integration for Space Station 13.
 
-### sada-client
+## sada-client
+
 A bridge library between game server and VC server. Uses byondapi to take load off the BYOND.
 
-### sada-common
+## sada-common
+
 Shared utilities library. Contains packet protocols, etc...
 
-### sada-server
+## sada-server
+
 Main VC server. Voice routing and auth happens here. Mixer/voice processing planned.
 
-### sada-web
+## sada-web
+
 Frontend implementation that connects to server.
