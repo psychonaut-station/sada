@@ -1,0 +1,2 @@
+[alias]
+build-client = "build -p sada-client --target i686-unknown-linux-gnu"
