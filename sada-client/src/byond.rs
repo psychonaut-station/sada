@@ -11,20 +11,31 @@ use std::{
 };
 
 thread_local! {
-    /// todo
+    /// Stores the most recent string returned to BYOND on this thread.
+    ///
+    /// BYOND expects the returned C string pointer to remain valid after the
+    /// exported function returns. Keeping the allocation in thread-local storage
+    /// gives each call a stable pointer until the next string return on the same
+    /// thread replaces it.
     #[doc(hidden)]
     pub static LAST_RETURN: RefCell<CString> = Default::default();
 }
 
-/// todo
+/// Shared empty C string used for BYOND functions that return no value.
 #[doc(hidden)]
 pub static VOID_RETURN: c_char = 0;
 
-/// wip
+/// Convert BYOND's raw argument array into borrowed Rust string slices.
+///
+/// Missing arguments are returned as empty strings. Arguments that are not valid
+/// UTF-8 are also treated as empty strings, matching the macro's forgiving
+/// conversion behavior.
 ///
 /// # Safety
 ///
-/// wip
+/// `argv` must point to an array containing at least `argc` valid, non-null
+/// pointers to NUL-terminated C strings. Each pointed-to string must remain
+/// valid for the returned lifetime.
 #[doc(hidden)]
 pub unsafe fn __parse_args<'a, const N: usize>(argc: c_int, argv: *const *const c_char) -> [&'a str; N] {
     let mut args = [""; N];
@@ -38,6 +49,10 @@ pub unsafe fn __parse_args<'a, const N: usize>(argc: c_int, argv: *const *const 
     args
 }
 
+/// Install the process-wide panic hook used by BYOND exports.
+///
+/// The hook preserves the previously installed panic hook, then appends the
+/// panic payload and captured backtrace to `sada_panic.log`.
 #[doc(hidden)]
 pub fn __set_panic_hook() {
     static PANIC_HOOK: Once = Once::new();
@@ -68,7 +83,11 @@ pub fn __set_panic_hook() {
     });
 }
 
-/// todo
+/// Convert a Rust function result into the raw C string pointer expected by BYOND.
+///
+/// Functions without an explicit return type use [`VOID_RETURN`]. Returned
+/// values are converted with [`ToString`] and stored in [`LAST_RETURN`] so the
+/// pointer remains valid after the exported function returns.
 #[doc(hidden)]
 macro_rules! __byond_return {
     ($res:ident ->) => {
@@ -89,7 +108,11 @@ macro_rules! __count_args {
     ($head:ident $(, $tail:ident)*) => { 1 + $crate::byond::__count_args!($($tail),*) };
 }
 
-/// wodo
+/// Define a BYOND-compatible exported function.
+///
+/// The macro wraps a Rust function body in an `unsafe extern "C"` function with
+/// BYOND's `argc`/`argv` calling convention, parses arguments, installs the panic
+/// hook by default, and converts the return value to a C string pointer.
 macro_rules! __function {
     (@panic_hook) => {
         $crate::byond::__set_panic_hook();
