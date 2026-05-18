@@ -25,6 +25,34 @@ thread_local! {
 #[doc(hidden)]
 pub static VOID_RETURN: c_char = 0;
 
+/// Converts one raw BYOND argument into a Rust parameter value.
+#[doc(hidden)]
+pub trait FromByondArg<'a>: Sized {
+    /// Convert `arg` into the destination type.
+    fn from_byond_arg(arg: &'a str) -> Self;
+}
+
+impl<'a> FromByondArg<'a> for &'a str {
+    fn from_byond_arg(arg: &'a str) -> Self { arg }
+}
+
+/// Implement BYOND argument conversion for owned types parsed from strings.
+macro_rules! impl_from_str_byond_arg {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl<'a> FromByondArg<'a> for $ty {
+                fn from_byond_arg(arg: &'a str) -> Self {
+                    ::std::str::FromStr::from_str(arg).unwrap_or_default()
+                }
+            }
+        )*
+    };
+}
+
+impl_from_str_byond_arg!(
+    String, bool, char, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, f32, f64
+);
+
 /// Convert BYOND's raw argument array into borrowed Rust string slices.
 ///
 /// Missing arguments are returned as empty strings. Arguments that are not valid
@@ -83,24 +111,6 @@ pub fn __set_panic_hook() {
     });
 }
 
-/// Convert a Rust function result into the raw C string pointer expected by BYOND.
-///
-/// Functions without an explicit return type use [`VOID_RETURN`]. Returned
-/// values are converted with [`ToString`] and stored in [`LAST_RETURN`] so the
-/// pointer remains valid after the exported function returns.
-#[doc(hidden)]
-macro_rules! __byond_return {
-    ($res:ident ->) => {
-        &$crate::byond::VOID_RETURN
-    };
-    ($res:ident -> $ret:ty) => {{
-        $crate::byond::LAST_RETURN.with(|last| {
-            last.replace(::std::ffi::CString::new(<$ret as ToString>::to_string(&$res)).unwrap_or_default());
-            last.borrow().as_ptr()
-        })
-    }};
-}
-
 /// Returns the number of arguments passed to the macro.
 #[doc(hidden)]
 macro_rules! __count_args {
@@ -113,7 +123,7 @@ macro_rules! __count_args {
 /// The macro wraps a Rust function body in an `unsafe extern "C"` function with
 /// BYOND's `argc`/`argv` calling convention, parses arguments, installs the panic
 /// hook by default, and converts the return value to a C string pointer.
-macro_rules! __function {
+macro_rules! function {
     (@panic_hook) => {
         $crate::byond::__set_panic_hook();
     };
@@ -121,35 +131,37 @@ macro_rules! __function {
         if !$skip_hook { $crate::byond::__set_panic_hook(); }
     };
 
-    attr($(skip_hook = $skip_hook:literal)?) (fn $name:ident() $(-> $ret:ty)? $body:block) => {
-        #[unsafe(no_mangle)]
-        #[allow(missing_docs, clippy::missing_safety_doc)]
-        pub unsafe extern "C" fn $name(
-            _argc: ::std::ffi::c_int, _argv: *const *const ::std::ffi::c_char
-        ) -> *const ::std::ffi::c_char {
-            $crate::byond::function!(@panic_hook $($skip_hook)?);
-            let __result = $body;
-            $crate::byond::__byond_return!(__result -> $($ret)?)
-        }
+    (@parse_args $argc:ident, $argv:ident;) => {};
+    (@parse_args $argc:ident, $argv:ident; $($arg:ident : $arg_ty:ty),+) => {
+        let __args = unsafe { $crate::byond::__parse_args::<{ $crate::byond::__count_args!($($arg),*) }>($argc, $argv) };
+        let mut __argi = 0;
+        $(let $arg: $arg_ty = <$arg_ty as $crate::byond::FromByondArg>::from_byond_arg(__args[__argi]); __argi += 1;)*
     };
 
-    attr($(skip_hook = $skip_hook:literal)?) (fn $name:ident($($arg:ident : $arg_ty:ty),*) $(-> $ret:ty)? $body:block) => {
+    (@return $res:ident ->) => {
+        &$crate::byond::VOID_RETURN
+    };
+    (@return $res:ident -> $ret:ty) => {{
+        $crate::byond::LAST_RETURN.with(|last| {
+            last.replace(::std::ffi::CString::new(<$ret as ToString>::to_string(&$res)).unwrap_or_default());
+            last.borrow().as_ptr()
+        })
+    }};
+
+    attr($(skip_hook = $skip_hook:literal)?) (fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $body:block) => {
         #[unsafe(no_mangle)]
         #[allow(missing_docs, clippy::missing_safety_doc)]
         pub unsafe extern "C" fn $name(
             _argc: ::std::ffi::c_int, _argv: *const *const ::std::ffi::c_char
         ) -> *const ::std::ffi::c_char {
             $crate::byond::function!(@panic_hook $($skip_hook)?);
-            let __args = unsafe { $crate::byond::__parse_args::<{ $crate::byond::__count_args!($($arg),*) }>(_argc, _argv) };
-            let mut __argi = 0;
-            $(let $arg: $arg_ty = ::std::str::FromStr::from_str(__args[__argi]).unwrap_or_default(); __argi += 1;)*
+            $crate::byond::function!(@parse_args _argc, _argv; $($arg : $arg_ty),*);
             let __result = $body;
-            $crate::byond::__byond_return!(__result -> $($ret)?)
+            $crate::byond::function!(@return __result -> $($ret)?)
         }
     };
 }
 
-pub(crate) use __byond_return;
 pub(crate) use __count_args;
 #[doc(inline)]
-pub(crate) use __function as function;
+pub(crate) use function;

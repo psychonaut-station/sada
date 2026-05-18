@@ -23,9 +23,13 @@
 	. = ..()
 
 	world.log << "Hello, world!"
-	world.log << "Sada version: [sada_get_version()]"
+	world.log << "Sada client version: [sada_get_version()]"
 
-	sada_init("/tmp/sada.sock")
+	var/init_result = sada_init("/tmp/sada.sock")
+	var/server_version = json_decode(init_result)["version"]
+
+	world.log << "Sada server version: [server_version]"
+
 	sada_set_ptt("test_ckey", TRUE)
 	sada_set_ptt("test_ckey", FALSE)
 

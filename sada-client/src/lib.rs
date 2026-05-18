@@ -22,13 +22,13 @@ fn encode_response(response: ControlResponse) -> String {
 fn get_version() -> &str { env!("CARGO_PKG_VERSION") }
 
 #[byond::function]
-fn init(path: String) -> String { encode_response(control::init(&path)) }
+fn init(path: &str) -> String { encode_response(control::init(path)) }
 
 #[byond::function]
-fn set_ptt(ckey: String, pressed: String) -> String { encode_response(control::set_ptt(ckey, pressed == "1")) }
+fn set_ptt(ckey: &str, pressed: &str) -> String { encode_response(control::set_ptt(ckey.to_owned(), pressed == "1")) }
 
 #[byond::function]
-fn echo(arg: String) -> &str { arg.as_str() }
+fn echo(arg: &str) -> &str { arg }
 
 #[byond::function]
 fn void() {}
