@@ -22,6 +22,8 @@
 /world/New()
 	. = ..()
 
+	spawn(0) shutdown()
+
 	world.log << "Hello, world!"
 	world.log << "Sada client version: [sada_get_version()]"
 
