@@ -13,10 +13,20 @@
 /proc/sada_panicing()
 	return SADA_CALL(panicing)
 
+/proc/sada_init(path)
+	return SADA_CALL(init, path)
+
+/proc/sada_set_ptt(ckey, pressed)
+	return SADA_CALL(set_ptt, ckey, pressed ? "1" : "0")
+
 /world/New()
 	. = ..()
-	spawn(0) shutdown()
+
 	world.log << "Hello, world!"
 	world.log << "Sada version: [sada_get_version()]"
-	sada_panicing()
+
+	sada_init("/tmp/sada.sock")
+	sada_set_ptt("test_ckey", TRUE)
+	sada_set_ptt("test_ckey", FALSE)
+
 	world.log << "Echo test: [sada_echo("Hello, Sada!")]"

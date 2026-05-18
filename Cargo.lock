@@ -1064,12 +1064,16 @@ name = "sada-client"
 version = "0.1.0"
 dependencies = [
  "sada-common",
+ "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "sada-common"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "sada-server"

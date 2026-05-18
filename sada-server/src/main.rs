@@ -4,6 +4,7 @@
 extern crate tracing;
 
 mod config;
+mod control;
 mod media;
 mod session;
 mod signaling;
@@ -30,6 +31,7 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(Config::load("config.toml")?);
     let addr = config.server.listen;
+    let control_socket = config.server.control_socket.clone();
 
     let state = Arc::new(AppState {
         config,
@@ -40,6 +42,14 @@ async fn main() -> Result<()> {
 
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "http server listening");
+
+    if let Some(path) = control_socket {
+        tokio::spawn(async move {
+            if let Err(err) = control::run(path).await {
+                error!(?err, "control socket listener stopped");
+            }
+        });
+    }
 
     axum::serve(listener, app).await?;
 

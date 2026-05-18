@@ -3,6 +3,7 @@
 use std::{
     fs,
     net::{IpAddr, SocketAddr},
+    path::PathBuf,
 };
 
 use anyhow::Context;
@@ -22,6 +23,8 @@ pub struct Config {
 pub struct ServerConfig {
     /// Socket address the server listens on.
     pub listen: SocketAddr,
+    /// Unix socket path used by the BYOND bridge control channel.
+    pub control_socket: Option<PathBuf>,
 }
 
 /// WebRTC transport configuration.

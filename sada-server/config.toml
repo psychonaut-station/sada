@@ -1,5 +1,6 @@
 [server]
 listen = "0.0.0.0:3000"
+control_socket = "/tmp/sada.sock"
 
 [webrtc]
 # IP address for WebRTC UDP sockets. If not set, auto-detects.
