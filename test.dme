@@ -13,5 +13,5 @@
 // END_PREFERENCES
 
 // BEGIN_INCLUDE
-#include "dmsrc/sada.dm"
+#include "dmsrc\sada.dm"
 // END_INCLUDE

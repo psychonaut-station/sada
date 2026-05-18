@@ -10,9 +10,13 @@
 /proc/sada_echo(str)
 	return SADA_CALL(echo, str)
 
+/proc/sada_panicing()
+	return SADA_CALL(panicing)
+
 /world/New()
 	. = ..()
 	spawn(0) shutdown()
 	world.log << "Hello, world!"
 	world.log << "Sada version: [sada_get_version()]"
+	sada_panicing()
 	world.log << "Echo test: [sada_echo("Hello, Sada!")]"
