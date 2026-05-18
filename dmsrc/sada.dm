@@ -1,14 +1,18 @@
-// #ifndef SADA
-// #define SADA (world.system_type == MS_WINDOWS ? "sada.dll" : "libsada.so")
-// #endif
+#ifndef SADA
+#define SADA (world.system_type == MS_WINDOWS ? "./sada.dll" : "./libsada.so")
+#endif
 
-// #define SADA_CALL(func, ...) call_ext(SADA, "[#func]")(...)
+#define SADA_CALL(func, args...) call_ext(SADA, #func)(##args)
 
-// /proc/sada_get_version()
-// 	return SADA_CALL(get_version)
+/proc/sada_get_version()
+	return SADA_CALL(get_version)
+
+/proc/sada_echo(str)
+	return SADA_CALL(echo, str)
 
 /world/New()
 	. = ..()
 	spawn(0) shutdown()
-	world << "[call_ext("./libsada.so", "get_version")()]"
-	// world << "SADA version: [sada_get_version()]"
+	world.log << "Hello, world!"
+	world.log << "Sada version: [sada_get_version()]"
+	world.log << "Echo test: [sada_echo("Hello, Sada!")]"
