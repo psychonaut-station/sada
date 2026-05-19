@@ -26,6 +26,17 @@ Ideally, you may want to run your editor in the nix shell as well, so the langua
 
 A bridge library between game server and VC server. Uses byondapi to take load off the BYOND.
 
+BYOND loads only 32-bit shared libraries, so build the client with the i686 target:
+
+```sh
+# For shorthand,
+cargo build-client
+# Or, if you want to be explicit,
+cargo build -p sada-client --target i686-unknown-linux-gnu
+```
+
+The debug build output is `target/i686-unknown-linux-gnu/debug/libsada.so`.
+
 ## sada-common
 
 Shared utilities library. Contains packet protocols, etc...

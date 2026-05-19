@@ -7,9 +7,10 @@ edition.workspace = true
 workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+name = "sada"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 sada-common.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "sync", "time"] }
