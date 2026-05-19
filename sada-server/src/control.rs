@@ -6,12 +6,16 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Context as _, Result};
-use sada_common::{ControlRequest, ControlResponse};
+use anyhow::{Context as _, Result, bail};
+use sada_common::{ControlFrameBuffer, ControlRequest, ControlResponse, MAX_CONTROL_FRAME_LEN};
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{UnixListener, UnixStream},
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{
+        UnixListener,
+        UnixStream,
+        unix::{OwnedReadHalf, OwnedWriteHalf},
+    },
     sync::Semaphore,
 };
 
@@ -57,30 +61,66 @@ async fn remove_stale_socket(path: &Path) -> Result<()> {
     }
 }
 
-/// Process newline-delimited JSON requests on one client connection.
+/// Process length-prefixed postcard requests on one client connection.
 async fn handle_connection(stream: UnixStream) -> Result<()> {
-    let (reader, mut writer) = stream.into_split();
-    let mut lines = BufReader::new(reader).lines();
+    let (mut reader, mut writer) = stream.into_split();
+    let mut buffer = ControlFrameBuffer::new();
 
-    while let Some(line) = lines.next_line().await.context("failed to read control request")? {
-        let response = match serde_json::from_str::<ControlRequest>(&line) {
+    while let Some(len) = read_frame(&mut reader, &mut buffer)
+        .await
+        .context("failed to read control request")?
+    {
+        let response = match buffer.decode(len) {
             Ok(request) => handle_request(request),
             Err(err) => ControlResponse::Error {
                 message: format!("invalid request: {err}"),
             },
         };
 
-        let encoded = serde_json::to_vec(&response).context("failed to encode control response")?;
-        writer
-            .write_all(&encoded)
+        write_frame(&mut writer, &mut buffer, &response)
             .await
             .context("failed to write control response")?;
-        writer
-            .write_all(b"\n")
-            .await
-            .context("failed to write control response newline")?;
     }
 
+    Ok(())
+}
+
+/// Read one length-prefixed postcard control frame.
+async fn read_frame(reader: &mut OwnedReadHalf, buffer: &mut ControlFrameBuffer) -> Result<Option<usize>> {
+    let mut len = [0; size_of::<u32>()];
+    match reader.read_exact(&mut len).await {
+        Ok(_) => {},
+        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(err) => return Err(err).context("failed to read control frame length"),
+    }
+
+    let len = u32::from_le_bytes(len) as usize;
+    if len > MAX_CONTROL_FRAME_LEN {
+        bail!("control frame too large: {len} bytes");
+    }
+
+    reader
+        .read_exact(buffer.payload_mut(len))
+        .await
+        .context("failed to read control frame payload")?;
+    Ok(Some(len))
+}
+
+/// Write one length-prefixed postcard control frame.
+async fn write_frame<T: serde::Serialize>(
+    writer: &mut OwnedWriteHalf, buffer: &mut ControlFrameBuffer, value: &T,
+) -> Result<()> {
+    let payload = buffer.encode(value).context("failed to encode control frame")?;
+    let len = u32::try_from(payload.len()).context("control frame too large to encode")?;
+
+    writer
+        .write_all(&len.to_le_bytes())
+        .await
+        .context("failed to write control frame length")?;
+    writer
+        .write_all(payload)
+        .await
+        .context("failed to write control frame payload")?;
     Ok(())
 }
 

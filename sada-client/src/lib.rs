@@ -11,8 +11,9 @@ use sada_common::ControlResponse;
 fn encode_response(response: ControlResponse) -> String {
     serde_json::to_string(&response).unwrap_or_else(|err| {
         serde_json::json!({
-            "type": "error",
-            "message": format!("failed to encode response: {err}"),
+            "error": {
+                "message": format!("failed to encode response: {err}"),
+            },
         })
         .to_string()
     })
