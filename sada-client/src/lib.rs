@@ -62,3 +62,13 @@ fn panicing2() -> i32 {
     #[allow(unreachable_code)]
     1
 }
+
+#[byondapi]
+fn update_position(mob: ByondValue, x: i32, y: i32) {
+    let Ok(name) = mob.read_var::<_, String>("name") else {
+        eprintln!("Failed to read mob name");
+        return;
+    };
+
+    println!("Updating position of {} to ({}, {})", name, x, y);
+}

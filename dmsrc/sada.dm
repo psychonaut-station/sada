@@ -29,10 +29,11 @@
 /proc/sada_set_ptt(ckey, pressed)
 	return SADA_CALL(set_ptt, ckey, pressed ? "1" : "0")
 
+/proc/sada_update_position(mob/mob, x, y)
+	return SADA_CALL_BYONDAPI(update_position, mob, x, y)
+
 /world/New()
 	. = ..()
-
-	spawn(0) shutdown()
 
 	world.log << "Hello, world!"
 	world.log << "Sada client version: [sada_get_version()]"
@@ -51,4 +52,19 @@
 
 	world.log << "Byond API echo test 2: [sada_echo3("Hello, Byond API 2!")]"
 
-	sada_panicing2()
+	var/mob/test_mob = new
+	test_mob.name = "Test Mob"
+
+	var/i = 0
+	while(i < 5)
+		sada_update_position(test_mob, test_mob.x, test_mob.y)
+		sleep(5)
+		i += 1
+
+	test_mob.something()
+
+	shutdown()
+
+/mob/proc/something()
+	world.log << "[src]"
+	return

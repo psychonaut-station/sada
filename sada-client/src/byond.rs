@@ -208,7 +208,7 @@ macro_rules! byondapi {
         ) -> ::meowtonin::sys::CByondValue {
             // $crate::byond::byondapi!(@panic_hook $($skip_hook)?);
             $crate::byond::byondapi!(@parse_args __argc, __argv, $($arg : $arg_ty),*);
-            let __result = $body;
+            let __result = (move || $body)();
             $crate::byond::byondapi!(@return __result -> $($ret)?)
         }
     };
