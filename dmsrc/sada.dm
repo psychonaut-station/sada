@@ -3,12 +3,16 @@
 #endif
 
 #define SADA_CALL(func, args...) call_ext(SADA, #func)(##args)
+#define SADA_CALL_BYONDAPI(func, args...) call_ext(SADA, "byond:[#func]")(##args)
 
 /proc/sada_get_version()
 	return SADA_CALL(get_version)
 
 /proc/sada_echo(str)
 	return SADA_CALL(echo, str)
+
+/proc/sada_echo2(str)
+	return SADA_CALL_BYONDAPI(echo2, str)
 
 /proc/sada_panicing()
 	return SADA_CALL(panicing)
@@ -36,3 +40,5 @@
 	world.log << "[sada_set_ptt("test_ckey", FALSE)]"
 
 	world.log << "Echo test: [sada_echo("Hello, Sada!")]"
+
+	world.log << "Byond API echo test: [sada_echo2("Hello, Byond API!")]"

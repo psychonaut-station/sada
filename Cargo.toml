@@ -11,6 +11,7 @@ anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
 hound = "3.5"
+meowtonin = { git = "https://github.com/psychonaut-station/meowtonin" }
 opus = "0.3"
 postcard = { version = "1", features = ["use-std"] }
 sada-common = { path = "sada-common" }

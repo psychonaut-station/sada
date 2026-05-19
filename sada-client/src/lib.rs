@@ -5,6 +5,7 @@
 mod byond;
 mod control;
 
+use meowtonin::ByondValue;
 use sada_common::ControlResponse;
 
 /// Encodes a [`ControlResponse`] into a JSON string. If encoding fails, returns an error message as JSON string.
@@ -39,4 +40,14 @@ fn panicing() -> i32 {
     panic!("This function panics!");
     #[allow(unreachable_code)]
     1
+}
+
+/// todo
+///
+/// # Safety
+///
+/// todo
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn echo2(_argc: u32, _argv: *mut ByondValue) -> ByondValue {
+    ByondValue::new_string("byondapi works!")
 }
