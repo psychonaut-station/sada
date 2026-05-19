@@ -1,4 +1,4 @@
-#![feature(macro_attr, never_type)]
+#![feature(macro_attr)]
 
 //! A bridge library between game server and VC server.
 
