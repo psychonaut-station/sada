@@ -5,6 +5,7 @@
 mod byond;
 mod control;
 
+use byond::byondapi;
 use meowtonin::ByondValue;
 use sada_common::ControlResponse;
 
@@ -50,4 +51,14 @@ fn panicing() -> i32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn echo2(_argc: u32, _argv: *mut ByondValue) -> ByondValue {
     ByondValue::new_string("byondapi works!")
+}
+
+#[byondapi]
+fn echo3(arg: String) -> String { arg }
+
+#[byondapi]
+fn panicing2() -> i32 {
+    panic!("This function panics too!");
+    #[allow(unreachable_code)]
+    1
 }

@@ -14,8 +14,14 @@
 /proc/sada_echo2(str)
 	return SADA_CALL_BYONDAPI(echo2, str)
 
+/proc/sada_echo3(str)
+	return SADA_CALL_BYONDAPI(echo3, str)
+
 /proc/sada_panicing()
 	return SADA_CALL(panicing)
+
+/proc/sada_panicing2()
+	return SADA_CALL_BYONDAPI(panicing2)
 
 /proc/sada_init(path)
 	return SADA_CALL(init, path)
@@ -42,3 +48,7 @@
 	world.log << "Echo test: [sada_echo("Hello, Sada!")]"
 
 	world.log << "Byond API echo test: [sada_echo2("Hello, Byond API!")]"
+
+	world.log << "Byond API echo test 2: [sada_echo3("Hello, Byond API 2!")]"
+
+	sada_panicing2()

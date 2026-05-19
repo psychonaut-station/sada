@@ -10,6 +10,11 @@ use std::{
     sync::Once,
 };
 
+use meowtonin::{
+    ByondValue,
+    sys::{CByondValue, u4c},
+};
+
 thread_local! {
     /// Stores the most recent string returned to BYOND on this thread.
     ///
@@ -162,6 +167,54 @@ macro_rules! function {
     };
 }
 
+/// todo
+pub fn __parse_args2<const N: usize>(argc: u4c, argv: *mut CByondValue) -> [ByondValue; N] {
+    let mut args = [ByondValue::NULL; N];
+    for (i, arg) in args.iter_mut().enumerate().take((argc as usize).min(N)) {
+        *arg = unsafe { ByondValue(*argv.add(i)) };
+    }
+    args
+}
+
+/// todo
+macro_rules! byondapi {
+    (@panic_hook) => {
+        $crate::byond::__set_panic_hook();
+    };
+    (@panic_hook $skip_hook:literal) => {
+        if !$skip_hook { $crate::byond::__set_panic_hook(); }
+    };
+
+    (@parse_args $argc:ident, $argv:ident,) => {};
+    (@parse_args $argc:ident, $argv:ident, $($arg:ident : $arg_ty:ty),+) => {
+        let [$($arg),*] = $crate::byond::__parse_args2::<{ $crate::byond::__count_args!($($arg),*) }>($argc, $argv);
+        $(let $arg: $arg_ty = <$arg_ty as ::meowtonin::FromByond>::from_byond($arg).unwrap_or_default();)*
+    };
+
+    (@return $res:ident ->) => {
+        ::meowtonin::ByondValue::NULL.detach()
+    };
+    (@return $res:ident -> $ret:ty) => {{
+        ::meowtonin::ByondValue::new_value::<$ret>($res).unwrap_or_default().detach()
+    }};
+
+    // attr($(catch = $catch:literal)?)
+
+    attr() (fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $body:block) => {
+        #[unsafe(no_mangle)]
+        #[allow(missing_docs, clippy::missing_safety_doc)]
+        pub unsafe extern "C-unwind" fn $name(
+            __argc: ::meowtonin::sys::u4c, __argv: *mut ::meowtonin::sys::CByondValue,
+        ) -> ::meowtonin::sys::CByondValue {
+            // $crate::byond::byondapi!(@panic_hook $($skip_hook)?);
+            $crate::byond::byondapi!(@parse_args __argc, __argv, $($arg : $arg_ty),*);
+            let __result = $body;
+            $crate::byond::byondapi!(@return __result -> $($ret)?)
+        }
+    };
+}
+
 pub(crate) use __count_args;
+pub(crate) use byondapi;
 #[doc(inline)]
 pub(crate) use function;
