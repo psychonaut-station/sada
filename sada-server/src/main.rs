@@ -11,8 +11,8 @@ mod signaling;
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use axum::{Router, routing::get};
+use thiserror::Error;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -22,11 +22,14 @@ use crate::{
     signaling::{AppState, ws_handler},
 };
 
+/// Result type used by the server entry point.
+type Result<T> = std::result::Result<T, Error>;
+
 /// Server entry point.
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("sada_server=debug".parse()?))
+        .with_env_filter(EnvFilter::from_default_env().add_directive("sada_server=debug".parse().unwrap()))
         .init();
 
     let path = std::env::var("SADA_CONFIG").unwrap_or_else(|_| "config.toml".into());
@@ -41,7 +44,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new().route("/ws", get(ws_handler)).with_state(state);
 
-    let listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(addr).await.map_err(|s| Error::BindHttp(addr, s))?;
     info!(%addr, "http server listening");
 
     if let Some(path) = control_socket {
@@ -52,7 +55,21 @@ async fn main() -> Result<()> {
         });
     }
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app).await.map_err(Error::ServeHttp)?;
 
     Ok(())
+}
+
+/// Errors that can stop the server process.
+#[derive(Debug, Error)]
+enum Error {
+    /// The server configuration could not be loaded.
+    #[error(transparent)]
+    Config(#[from] config::Error),
+    /// The HTTP listener could not bind to the configured address.
+    #[error("failed to bind HTTP listener at {0}")]
+    BindHttp(std::net::SocketAddr, #[source] std::io::Error),
+    /// The HTTP server stopped with an I/O error.
+    #[error("HTTP server error")]
+    ServeHttp(#[source] std::io::Error),
 }
