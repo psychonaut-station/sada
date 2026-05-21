@@ -238,7 +238,7 @@ export class Sada extends LitElement {
                     >
                         ${this.muted ? "Unmute" : "Mute"}
                     </button>
-                    <button class="btn-disconnect" @click=${() => this.cleanup()}>
+                    <button class="btn-disconnect" @click="${() => this.cleanup()}">
                         Disconnect
                     </button>
                 `;
