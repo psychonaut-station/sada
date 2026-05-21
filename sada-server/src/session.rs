@@ -170,6 +170,8 @@ pub struct Session {
     socket: UdpSocket,
     /// Room state used to forward audio between peers.
     room: SessionRoom,
+    /// Debug audio sink.
+    sink: AudioSink,
 }
 
 impl Session {
@@ -194,11 +196,15 @@ impl Session {
 
         let answer_sdp = answer.to_sdp_string();
 
+        let session_room = room.join();
+        let session_id = session_room.id;
+
         Ok((
             Self {
                 rtc,
                 socket,
-                room: room.join(),
+                room: session_room,
+                sink: AudioSink::new(session_id.0),
             },
             answer_sdp,
         ))
@@ -208,11 +214,10 @@ impl Session {
     pub async fn run(mut self) {
         info!("str0m run loop started");
 
-        let mut audio = AudioSink::new();
         let mut buf = vec![0; 65535];
 
         loop {
-            let timeout = match self.poll(&mut audio).await {
+            let timeout = match self.poll().await {
                 Loop::Timeout(t) => t,
                 Loop::Continue => continue,
                 Loop::Done => return,
@@ -270,7 +275,7 @@ impl Session {
     }
 
     /// Poll str0m once and perform any requested I/O.
-    async fn poll(&mut self, audio: &mut AudioSink) -> Loop {
+    async fn poll(&mut self) -> Loop {
         match self.rtc.poll_output() {
             Ok(Output::Timeout(v)) => Loop::Timeout(v),
             Ok(Output::Transmit(v)) => {
@@ -279,7 +284,7 @@ impl Session {
                 }
                 Loop::Continue
             },
-            Ok(Output::Event(event)) => self.handle_event(event, audio),
+            Ok(Output::Event(event)) => self.handle_event(event),
             Err(err) => {
                 error!(?err, "str0m poll_output error");
                 Loop::Done
@@ -288,7 +293,7 @@ impl Session {
     }
 
     /// Handle a single str0m event.
-    fn handle_event(&mut self, event: Event, audio: &mut AudioSink) -> Loop {
+    fn handle_event(&mut self, event: Event) -> Loop {
         match event {
             Event::Connected => {
                 info!("WebRTC peer connected");
@@ -304,7 +309,7 @@ impl Session {
                 info!(mid = ?ma.mid, kind = ?ma.kind, "media added");
             },
             Event::MediaData(data) => {
-                audio.handle_frame(&data);
+                self.sink.handle_frame(&data);
                 if let Err(err) = self.room.audio_tx.send(ForwardedAudio::new(self.room.id, data)) {
                     warn!(?err, "audio relay has no receivers");
                 }

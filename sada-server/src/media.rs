@@ -22,10 +22,10 @@ pub struct AudioSink {
 
 impl AudioSink {
     /// Create a new audio sink.
-    pub fn new() -> Self {
+    pub fn new(id: u64) -> Self {
         let dumper = if cfg!(feature = "audio_dump") {
-            let path = "audio_dump.wav";
-            match AudioDumper::create(path) {
+            let path = format!("audio_dump_{id}.wav");
+            match AudioDumper::create(&path) {
                 Ok(d) => {
                     info!(path, "audio dumper: writing to file");
                     Some(d)
