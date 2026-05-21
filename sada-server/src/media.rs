@@ -2,10 +2,13 @@
 
 use std::{fs::File, io::BufWriter, path::Path};
 
-use anyhow::{Context as _, Result};
 use hound::{WavSpec, WavWriter};
 use opus::Channels;
 use str0m::media::MediaData;
+use thiserror::Error;
+
+/// Result type used by media helpers.
+type Result<T> = std::result::Result<T, Error>;
 
 /// Consumes incoming audio media frames.
 pub struct AudioSink {
@@ -81,7 +84,7 @@ struct AudioDumper {
 impl AudioDumper {
     /// Create a dumper that writes to `path`.
     fn create(path: impl AsRef<Path>) -> Result<Self> {
-        let decoder = opus::Decoder::new(48000, Channels::Mono).context("failed to create Opus decoder")?;
+        let decoder = opus::Decoder::new(48000, Channels::Mono).map_err(Error::CreateOpusDecoder)?;
 
         let spec = WavSpec {
             channels: 1,
@@ -90,7 +93,7 @@ impl AudioDumper {
             sample_format: hound::SampleFormat::Int,
         };
 
-        let writer = WavWriter::create(path, spec).context("failed to create WAV file")?;
+        let writer = WavWriter::create(path, spec).map_err(Error::CreateWavFile)?;
 
         Ok(Self {
             decoder,
@@ -106,10 +109,10 @@ impl AudioDumper {
         let samples = self
             .decoder
             .decode(opus_data, &mut pcm_buf, false)
-            .context("Opus decode failed")?;
+            .map_err(Error::DecodeOpus)?;
 
         for &sample in &pcm_buf[..samples] {
-            self.writer.write_sample(sample).context("WAV write failed")?;
+            self.writer.write_sample(sample).map_err(Error::WriteWavSample)?;
         }
 
         self.sample_count += samples as u64;
@@ -135,4 +138,21 @@ impl Drop for AudioDumper {
             error!(?err, "audio dumper: flush error");
         }
     }
+}
+
+/// Errors that can happen while dumping incoming audio.
+#[derive(Debug, Error)]
+enum Error {
+    /// The Opus decoder could not be initialized.
+    #[error("failed to create Opus decoder")]
+    CreateOpusDecoder(#[source] opus::Error),
+    /// The WAV output file could not be created.
+    #[error("failed to create WAV file")]
+    CreateWavFile(#[source] hound::Error),
+    /// An Opus packet could not be decoded.
+    #[error("Opus decode failed")]
+    DecodeOpus(#[source] opus::Error),
+    /// A decoded PCM sample could not be written to the WAV output.
+    #[error("WAV write failed")]
+    WriteWavSample(#[source] hound::Error),
 }

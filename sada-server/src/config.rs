@@ -6,8 +6,11 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::Context;
 use serde::Deserialize;
+use thiserror::Error;
+
+/// Result type used by configuration loading.
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Complete server configuration loaded from TOML.
 #[derive(Debug, Deserialize)]
@@ -37,9 +40,20 @@ pub struct WebRtcConfig {
 
 impl Config {
     /// Load configuration from a TOML file at `path`.
-    pub fn load(path: &str) -> anyhow::Result<Self> {
-        let content = fs::read_to_string(path).with_context(|| format!("failed to read config from {path}"))?;
-        let config = toml::from_str(&content).with_context(|| format!("failed to parse config from {path}"))?;
+    pub fn load(path: &str) -> Result<Self> {
+        let content = fs::read_to_string(path).map_err(|s| Error::Read(path.to_owned(), s))?;
+        let config = toml::from_str(&content).map_err(|s| Error::Parse(path.to_owned(), s))?;
         Ok(config)
     }
+}
+
+/// Errors that can happen while loading server configuration.
+#[derive(Debug, Error)]
+pub enum Error {
+    /// The configuration file could not be read.
+    #[error("failed to read config from {0}")]
+    Read(String, #[source] std::io::Error),
+    /// The configuration file was not valid TOML for the expected schema.
+    #[error("failed to parse config from {0}")]
+    Parse(String, #[source] toml::de::Error),
 }

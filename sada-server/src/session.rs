@@ -1,6 +1,7 @@
 //! WebRTC session setup and event loop handling.
 
 use std::{
+    io,
     net::IpAddr,
     sync::{
         Arc,
@@ -10,7 +11,6 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{Context as _, Result, bail};
 use str0m::{
     Candidate,
     Event,
@@ -20,11 +20,13 @@ use str0m::{
     Rtc,
     RtcConfig,
     change::SdpOffer,
+    error::{IceError, RtcError, SdpError},
     format::PayloadParams,
     media::{MediaData, MediaTime, Mid},
     net::{Protocol, Receive},
 };
 use systemstat::{Platform, System};
+use thiserror::Error;
 use tokio::{
     net::UdpSocket,
     select,
@@ -32,6 +34,9 @@ use tokio::{
 };
 
 use crate::{config::WebRtcConfig, media::AudioSink};
+
+/// Result type used by session setup.
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Identifier assigned to a connected WebRTC session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,7 +119,7 @@ struct SessionRoom {
 /// Select the first usable non-loopback IPv4 address from the host.
 fn select_host_address() -> Result<IpAddr> {
     let system = System::new();
-    let networks = system.networks().unwrap();
+    let networks = system.networks().map_err(Error::ListNetworkInterfaces)?;
 
     for net in networks.values() {
         for n in &net.addrs {
@@ -128,7 +133,7 @@ fn select_host_address() -> Result<IpAddr> {
         }
     }
 
-    bail!("found no usable network interface");
+    Err(Error::NoUsableNetworkInterface)
 }
 
 /// Select and cache the automatically detected host IP address.
@@ -170,23 +175,22 @@ pub struct Session {
 impl Session {
     /// Create a session from a remote SDP offer and return the SDP answer.
     pub async fn from_offer(offer_sdp: &str, webrtc_config: &WebRtcConfig, room: &Room) -> Result<(Self, String)> {
-        let offer = SdpOffer::from_sdp_string(offer_sdp).context("failed to parse SDP offer")?;
+        let offer = SdpOffer::from_sdp_string(offer_sdp).map_err(Error::ParseOffer)?;
 
         let mut rtc = RtcConfig::new().clear_codecs().enable_opus(true).build(Instant::now());
 
         let host_ip = match webrtc_config.host_ip {
             Some(ip) => ip,
-            None => auto_host_address().context("failed to auto-detect host IP address")?,
+            None => auto_host_address()?,
         };
         let socket = UdpSocket::bind((host_ip, 0))
             .await
-            .context("failed to bind UDP socket")?;
-        let addr = socket.local_addr().expect("failed to get local socket address");
-        let candidate = Candidate::host(addr, "udp").context("failed to create host candidate")?;
-        rtc.add_local_candidate(candidate)
-            .context("failed to add local candidate")?;
+            .map_err(|s| Error::BindUdpSocket(host_ip, s))?;
+        let addr = socket.local_addr().map_err(Error::LocalSocketAddress)?;
+        let candidate = Candidate::host(addr, "udp").map_err(Error::CreateHostCandidate)?;
+        rtc.add_local_candidate(candidate).ok_or(Error::AddLocalCandidate)?;
 
-        let answer = rtc.sdp_api().accept_offer(offer).context("failed to accept offer")?;
+        let answer = rtc.sdp_api().accept_offer(offer).map_err(Error::AcceptOffer)?;
 
         let answer_sdp = answer.to_sdp_string();
 
@@ -334,4 +338,33 @@ impl Session {
             warn!(?err, "failed to write forwarded audio");
         }
     }
+}
+
+/// Errors that can happen while creating a WebRTC session.
+#[derive(Debug, Error)]
+pub enum Error {
+    /// The remote SDP offer could not be parsed.
+    #[error("failed to parse SDP offer")]
+    ParseOffer(#[source] SdpError),
+    /// Local network interfaces could not be listed.
+    #[error("failed to list network interfaces")]
+    ListNetworkInterfaces(#[source] io::Error),
+    /// No usable non-loopback IPv4 address was available.
+    #[error("found no usable network interface")]
+    NoUsableNetworkInterface,
+    /// The UDP socket for WebRTC traffic could not be bound.
+    #[error("failed to bind UDP socket to {0}")]
+    BindUdpSocket(IpAddr, #[source] io::Error),
+    /// The bound UDP socket's local address could not be read.
+    #[error("failed to get local socket address")]
+    LocalSocketAddress(#[source] io::Error),
+    /// A host ICE candidate could not be created.
+    #[error("failed to create host candidate")]
+    CreateHostCandidate(#[source] IceError),
+    /// The host ICE candidate was rejected by str0m.
+    #[error("failed to add local candidate")]
+    AddLocalCandidate,
+    /// str0m rejected the remote offer.
+    #[error("failed to accept offer")]
+    AcceptOffer(#[source] RtcError),
 }

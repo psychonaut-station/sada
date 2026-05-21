@@ -11,16 +11,17 @@ default = []
 audio_dump = []
 
 [dependencies]
-anyhow.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 hound.workspace = true
 opus.workspace = true
+postcard.workspace = true
 sada-common.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 str0m.workspace = true
 systemstat.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 tracing.workspace = true
