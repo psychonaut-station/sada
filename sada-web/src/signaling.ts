@@ -40,7 +40,8 @@ export class SignalingClient {
             webSocket.onclose = (ev) => this.handlers.onClose?.(ev);
             webSocket.onerror = (ev) => {
                 this.handlers.onError?.(ev);
-                if (webSocket.readyState !== WebSocket.OPEN) reject(new Error("WebSocket connect failed"));
+                if (webSocket.readyState !== WebSocket.OPEN)
+                    reject(new Error("WebSocket connect failed"));
             };
         });
     }
