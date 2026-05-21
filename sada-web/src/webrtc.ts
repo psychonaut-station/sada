@@ -13,11 +13,16 @@ export class WebRTCManager {
     private readonly events: CallEvents;
     private remoteStream: MediaStream;
 
-    constructor(signaling: SignalingClient, events: CallEvents, iceServers?: RTCIceServer[]) {
+    constructor(
+        signaling: SignalingClient,
+        events: CallEvents,
+        iceServers?: RTCIceServer[],
+    ) {
         this.signaling = signaling;
         this.events = events;
         this.peerConnection = new RTCPeerConnection({
-            iceServers: iceServers ?? config.iceServers.map((url) => ({ urls: url })),
+            iceServers:
+                iceServers ?? config.iceServers.map((url) => ({ urls: url })),
         });
         this.remoteStream = new MediaStream();
 
@@ -62,11 +67,17 @@ export class WebRTCManager {
             }
             const handler = () => {
                 if (this.peerConnection.iceGatheringState === "complete") {
-                    this.peerConnection.removeEventListener("icegatheringstatechange", handler);
+                    this.peerConnection.removeEventListener(
+                        "icegatheringstatechange",
+                        handler,
+                    );
                     resolve();
                 }
             };
-            this.peerConnection.addEventListener("icegatheringstatechange", handler);
+            this.peerConnection.addEventListener(
+                "icegatheringstatechange",
+                handler,
+            );
         });
 
         this.signaling.send({
