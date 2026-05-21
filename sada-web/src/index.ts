@@ -218,7 +218,7 @@ export class Sada extends LitElement {
         switch (this.connectionState) {
             case "disconnected":
                 controls = html`
-                    <button class="btn-connect" @click=${() => this.tryConnect()}>
+                    <button class="btn-connect" @click="${() => this.tryConnect()}">
                         Connect
                     </button>
                 `;
