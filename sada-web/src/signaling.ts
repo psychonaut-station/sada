@@ -1,10 +1,6 @@
-export type ClientMessage =
-    | { type: "offer"; sdp: string }
-    | { type: "close" };
+export type ClientMessage = { type: "offer"; sdp: string } | { type: "close" };
 
-export type ServerMessage =
-    | { type: "answer"; sdp: string }
-    | { type: "close" };
+export type ServerMessage = { type: "answer"; sdp: string } | { type: "close" };
 
 export type SignalingHandlers = {
     onServerMessage: (msg: ServerMessage) => void;
@@ -14,7 +10,7 @@ export type SignalingHandlers = {
 };
 
 export class SignalingClient {
-    private ws: WebSocket | null = null;
+    private webSocket: WebSocket | null = null;
     private readonly url: string;
     private readonly handlers: SignalingHandlers;
 
@@ -27,13 +23,13 @@ export class SignalingClient {
 
     connect(): Promise<void> {
         return new Promise((resolve, reject) => {
-            const ws = new WebSocket(this.url);
-            this.ws = ws;
-            ws.onopen = () => {
+            const webSocket = new WebSocket(this.url);
+            this.webSocket = webSocket;
+            webSocket.onopen = () => {
                 this.handlers.onOpen?.();
                 resolve();
             };
-            ws.onmessage = (ev) => {
+            webSocket.onmessage = (ev) => {
                 const msg = this.onServerMessage(typeof ev.data === "string" ? ev.data : "");
                 if (!msg) {
                     console.error("Failed to parse signaling message", ev.data);
@@ -41,33 +37,33 @@ export class SignalingClient {
                 }
                 this.handlers.onServerMessage(msg);
             };
-            ws.onclose = (ev) => this.handlers.onClose?.(ev);
-            ws.onerror = (ev) => {
+            webSocket.onclose = (ev) => this.handlers.onClose?.(ev);
+            webSocket.onerror = (ev) => {
                 this.handlers.onError?.(ev);
-                if (ws.readyState !== WebSocket.OPEN) reject(new Error("WebSocket connect failed"));
+                if (webSocket.readyState !== WebSocket.OPEN) reject(new Error("WebSocket connect failed"));
             };
         });
     }
 
     send(msg: ClientMessage): void {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        if (!this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) {
             throw new Error("signaling: not connected");
         }
-        this.ws.send(JSON.stringify(msg));
+        this.webSocket.send(JSON.stringify(msg));
     }
 
     close(): void {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
             try {
-                this.ws.send(JSON.stringify({ type: "close" } satisfies ClientMessage));
+                this.webSocket.send(JSON.stringify({ type: "close" } satisfies ClientMessage));
             } catch {}
         }
-        this.ws?.close();
-        this.ws = null;
+        this.webSocket?.close();
+        this.webSocket = null;
     }
 
     get state(): number {
-        return this.ws?.readyState ?? WebSocket.CLOSED;
+        return this.webSocket?.readyState ?? WebSocket.CLOSED;
     }
 
     private onServerMessage(raw: string): ServerMessage | null {

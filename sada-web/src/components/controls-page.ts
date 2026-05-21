@@ -3,13 +3,13 @@ import { customElement } from "lit/decorators.js";
 
 @customElement("controls-page")
 export class ControlsPage extends LitElement {
-  static styles = css`
-    :host {
-      display: block;
-    }
-  `;
+    static styles = css`
+        :host {
+          display: block;
+        }
+    `;
 
-  protected render(): TemplateResult {
-    return html``;
-  }
+    protected render(): TemplateResult {
+        return html``;
+    }
 }

@@ -1,8 +1,8 @@
 import { css, html, LitElement, nothing, type TemplateResult } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
-import { WebRTCManager } from "./webrtc.js";
-import { SignalingClient, type ServerMessage } from "./signaling.js";
 import config from "./config.json";
+import { type ServerMessage, SignalingClient } from "./signaling.js";
+import { WebRTCManager } from "./webrtc.js";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
 
@@ -131,7 +131,8 @@ export class Sada extends LitElement {
     private async tryConnect(): Promise<void> {
         this.connectionState = "connecting";
 
-        const signaling = new SignalingClient(`ws://${location.hostname}:${config.signalingPort}/ws`, "", {
+        const signalingUrl = `ws://${location.hostname}:${config.signalingPort}/ws`;
+        const signaling = new SignalingClient(signalingUrl, "", {
             onServerMessage: (msg) => this.onMessage(msg),
             onOpen: () => console.log("signaling open"),
             onClose: () => {
@@ -187,9 +188,9 @@ export class Sada extends LitElement {
     private onMessage(message: ServerMessage): void {
         switch (message.type) {
             case "answer":
-                this.rtc?.applyAnswer(message.sdp).catch((e) =>
-                    console.error("applyAnswer failed", e),
-                );
+                this.rtc?.applyAnswer(message.sdp).catch((e) => {
+                    console.error("applyAnswer failed", e);
+                });
                 break;
         }
     }
@@ -212,6 +213,41 @@ export class Sada extends LitElement {
     }
 
     protected render(): TemplateResult {
+        let controls: TemplateResult | typeof nothing;
+
+        switch (this.connectionState) {
+            case "disconnected":
+                controls = html`
+                    <button class="btn-connect" @click="${() => this.tryConnect()}">
+                        Connect
+                    </button>
+                `;
+                break;
+            case "connecting":
+                controls = html`
+                    <button class="btn-disconnect" @click="${() => this.cleanup()}">
+                        Cancel
+                    </button>
+                `;
+                break;
+            case "connected":
+                controls = html`
+                    <button
+                        class=${this.muted ? "btn-unmute" : "btn-mute"}
+                        @click="${() => this.toggleMute()"}
+                    >
+                        ${this.muted ? "Unmute" : "Mute"}
+                    </button>
+                    <button class="btn-disconnect" @click="${() => this.cleanup()}">
+                        Disconnect
+                    </button>
+                `;
+                break;
+            default:
+                controls = nothing;
+                break;
+        }
+
         return html`
             <div class="container">
                 <audio class="remote-audio" autoplay playsinline></audio>
@@ -222,33 +258,7 @@ export class Sada extends LitElement {
                 </span>
 
                 <div class="controls">
-                    ${this.connectionState === "disconnected"
-                        ? html`
-                              <button class="btn-connect" @click=${() => this.tryConnect()}>
-                                  Connect
-                              </button>
-                          `
-                        : nothing}
-                    ${this.connectionState === "connecting"
-                        ? html`
-                              <button class="btn-disconnect" @click=${() => this.cleanup()}>
-                                  Cancel
-                              </button>
-                          `
-                        : nothing}
-                    ${this.connectionState === "connected"
-                        ? html`
-                              <button
-                                  class=${this.muted ? "btn-unmute" : "btn-mute"}
-                                  @click=${() => this.toggleMute()}
-                              >
-                                  ${this.muted ? "Unmute" : "Mute"}
-                              </button>
-                              <button class="btn-disconnect" @click=${() => this.cleanup()}>
-                                  Disconnect
-                              </button>
-                          `
-                        : nothing}
+                    ${controls}
                 </div>
             </div>
         `;

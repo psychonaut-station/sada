@@ -1,5 +1,5 @@
-import type { SignalingClient } from "./signaling";
 import config from "./config.json";
+import type { SignalingClient } from "./signaling";
 
 export type CallEvents = {
     onRemoteTrack: (stream: MediaStream) => void;
@@ -7,7 +7,7 @@ export type CallEvents = {
 };
 
 export class WebRTCManager {
-    private pc: RTCPeerConnection;
+    private peerConnection: RTCPeerConnection;
     private localStream: MediaStream | null = null;
     private readonly signaling: SignalingClient;
     private readonly events: CallEvents;
@@ -16,18 +16,20 @@ export class WebRTCManager {
     constructor(signaling: SignalingClient, events: CallEvents, iceServers?: RTCIceServer[]) {
         this.signaling = signaling;
         this.events = events;
-        this.pc = new RTCPeerConnection({
+        this.peerConnection = new RTCPeerConnection({
             iceServers: iceServers ?? config.iceServers.map((url) => ({ urls: url })),
         });
         this.remoteStream = new MediaStream();
 
-        this.pc.ontrack = (ev) => {
-            ev.streams[0]?.getTracks().forEach((t) => this.remoteStream.addTrack(t));
+        this.peerConnection.ontrack = (ev) => {
+            ev.streams[0]?.getTracks().forEach((track) => {
+                this.remoteStream.addTrack(track);
+            });
             this.events.onRemoteTrack(this.remoteStream);
         };
 
-        this.pc.onconnectionstatechange = () => {
-            this.events.onConnectionState(this.pc.connectionState);
+        this.peerConnection.onconnectionstatechange = () => {
+            this.events.onConnectionState(this.peerConnection.connectionState);
         };
     }
 
@@ -40,51 +42,62 @@ export class WebRTCManager {
             },
             video: false,
         });
-        this.localStream.getTracks().forEach((t) => this.pc.addTrack(t, this.localStream!));
+        this.localStream.getTracks().forEach((track) => {
+            // biome-ignore lint/style/noNonNullAssertion: see just above
+            this.peerConnection.addTrack(track, this.localStream!);
+        });
     }
 
     async createOffer(): Promise<void> {
-        const offer = await this.pc.createOffer();
-        await this.pc.setLocalDescription(offer);
+        const offer = await this.peerConnection.createOffer();
+        await this.peerConnection.setLocalDescription(offer);
 
         // Wait for ICE gathering to finish so all candidates are bundled
         // in the offer SDP. The check guards against the rare case where
         // gathering is already complete before we attach the listener.
         await new Promise<void>((resolve) => {
-            if (this.pc.iceGatheringState === "complete") {
+            if (this.peerConnection.iceGatheringState === "complete") {
                 resolve();
                 return;
             }
             const handler = () => {
-                if (this.pc.iceGatheringState === "complete") {
-                    this.pc.removeEventListener("icegatheringstatechange", handler);
+                if (this.peerConnection.iceGatheringState === "complete") {
+                    this.peerConnection.removeEventListener("icegatheringstatechange", handler);
                     resolve();
                 }
             };
-            this.pc.addEventListener("icegatheringstatechange", handler);
+            this.peerConnection.addEventListener("icegatheringstatechange", handler);
         });
 
-        this.signaling.send({ type: "offer", sdp: this.pc.localDescription?.sdp ?? "" });
+        this.signaling.send({
+            type: "offer",
+            sdp: this.peerConnection.localDescription?.sdp ?? "",
+        });
     }
 
     async applyAnswer(sdp: string): Promise<void> {
-        await this.pc.setRemoteDescription({ type: "answer", sdp });
+        await this.peerConnection.setRemoteDescription({ type: "answer", sdp });
     }
 
     toggleMute(): boolean {
         if (!this.localStream) return false;
         const tracks = this.localStream.getAudioTracks();
         if (tracks.length === 0) return false;
+        // biome-ignore lint/style/noNonNullAssertion: we check tracks.length above
         const newEnabled = !tracks[0]!.enabled;
-        tracks.forEach((t) => (t.enabled = newEnabled));
+        tracks.forEach((track) => {
+            track.enabled = newEnabled;
+        });
         return !newEnabled;
     }
 
     hangup(): void {
-        this.localStream?.getTracks().forEach((t) => t.stop());
+        this.localStream?.getTracks().forEach((track) => {
+            track.stop();
+        });
         this.localStream = null;
         try {
-            this.pc.close();
+            this.peerConnection.close();
         } catch {}
     }
 }
