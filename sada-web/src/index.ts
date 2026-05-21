@@ -234,7 +234,7 @@ export class Sada extends LitElement {
                 controls = html`
                     <button
                         class=${this.muted ? "btn-unmute" : "btn-mute"}
-                        @click="${() => this.toggleMute()"}
+                        @click="${() => this.toggleMute()}"
                     >
                         ${this.muted ? "Unmute" : "Mute"}
                     </button>
