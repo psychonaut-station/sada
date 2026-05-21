@@ -225,7 +225,7 @@ export class Sada extends LitElement {
                 break;
             case "connecting":
                 controls = html`
-                    <button class="btn-disconnect" @click=${() => this.cleanup()}>
+                    <button class="btn-disconnect" @click="${() => this.cleanup()}">
                         Cancel
                     </button>
                 `;
