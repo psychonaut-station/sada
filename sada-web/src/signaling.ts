@@ -61,7 +61,7 @@ export class SignalingClient {
                 this.webSocket.send(
                     JSON.stringify({ type: "close" } satisfies ClientMessage),
                 );
-            } catch {}
+            } catch { }
         }
         this.webSocket?.close();
         this.webSocket = null;

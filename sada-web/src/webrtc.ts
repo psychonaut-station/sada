@@ -109,6 +109,6 @@ export class WebRTCManager {
         this.localStream = null;
         try {
             this.peerConnection.close();
-        } catch {}
+        } catch { }
     }
 }
