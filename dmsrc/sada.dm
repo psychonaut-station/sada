@@ -11,17 +11,14 @@
 /proc/sada_echo(str)
 	return SADA_CALL(echo, str)
 
-/proc/sada_echo2(str)
-	return SADA_CALL_BYONDAPI(echo2, str)
-
-/proc/sada_echo3(str)
-	return SADA_CALL_BYONDAPI(echo3, str)
+/proc/sada_echo_bapi(str)
+	return SADA_CALL_BYONDAPI(echo_bapi, str)
 
 /proc/sada_panicing()
 	return SADA_CALL(panicing)
 
-/proc/sada_panicing2()
-	return SADA_CALL_BYONDAPI(panicing2)
+/proc/sada_panicing_bapi()
+	return SADA_CALL_BYONDAPI(panicing_bapi)
 
 /proc/sada_init(path)
 	return SADA_CALL(init, path)
@@ -48,18 +45,14 @@
 
 	world.log << "Echo test: [sada_echo("Hello, Sada!")]"
 
-	world.log << "Byond API echo test: [sada_echo2("Hello, Byond API!")]"
-
-	world.log << "Byond API echo test 2: [sada_echo3("Hello, Byond API 2!")]"
+	world.log << "Byond API echo test: [sada_echo_bapi("Hello!")]"
 
 	var/mob/test_mob = new
 	test_mob.name = "Test Mob"
 
-	var/i = 0
-	while(i < 5)
+	for(var/i in 1 to 5)
 		sada_update_position(test_mob, test_mob.x, test_mob.y)
 		sleep(5)
-		i += 1
 
 	test_mob.something()
 

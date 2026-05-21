@@ -63,21 +63,26 @@ impl_from_str_byond_arg!(
 /// Missing arguments are returned as empty strings. Arguments that are not valid
 /// UTF-8 are also treated as empty strings, matching the macro's forgiving
 /// conversion behavior.
-///
-/// # Safety
-///
-/// `argv` must point to an array containing at least `argc` valid, non-null
-/// pointers to NUL-terminated C strings. Each pointed-to string must remain
-/// valid for the returned lifetime.
 #[doc(hidden)]
-pub unsafe fn __parse_args<'a, const N: usize>(argc: c_int, argv: *const *const c_char) -> [&'a str; N] {
+pub fn __parse_args<'a, const N: usize>(argc: c_int, argv: *const *const c_char) -> [&'a str; N] {
     let mut args = [""; N];
-    for (i, arg) in args.iter_mut().enumerate() {
-        if i >= argc as usize {
-            break;
-        }
+    for (i, arg) in args.iter_mut().enumerate().take((argc as usize).min(N)) {
         let c_str = unsafe { CStr::from_ptr(*argv.add(i)) };
         *arg = c_str.to_str().unwrap_or_default();
+    }
+    args
+}
+
+/// Convert BYOND API's raw value array into owned [`ByondValue`] handles.
+///
+/// Missing arguments are returned as null BYOND values. Each value points at the
+/// argument slot provided by BYOND so the macro can hand it to meowtonin's
+/// conversion traits.
+#[doc(hidden)]
+pub fn __parse_bapi_args<const N: usize>(argc: u4c, argv: *mut CByondValue) -> [ByondValue; N] {
+    let mut args = [ByondValue::NULL; N];
+    for (i, arg) in args.iter_mut().enumerate().take((argc as usize).min(N)) {
+        *arg = unsafe { ByondValue(*argv.add(i)) };
     }
     args
 }
@@ -136,11 +141,10 @@ macro_rules! function {
         if !$skip_hook { $crate::byond::__set_panic_hook(); }
     };
 
-    (@parse_args $argc:ident, $argv:ident;) => {};
-    (@parse_args $argc:ident, $argv:ident; $($arg:ident : $arg_ty:ty),+) => {
-        let __args = unsafe { $crate::byond::__parse_args::<{ $crate::byond::__count_args!($($arg),*) }>($argc, $argv) };
-        let mut __argi = 0;
-        $(let $arg: $arg_ty = <$arg_ty as $crate::byond::FromByondArg>::from_byond_arg(__args[__argi]); __argi += 1;)*
+    (@parse_args $argc:ident, $argv:ident,) => {};
+    (@parse_args $argc:ident, $argv:ident, $($arg:ident : $arg_ty:ty),+) => {
+        let [$($arg),*] = $crate::byond::__parse_args::<{ $crate::byond::__count_args!($($arg),*) }>($argc, $argv);
+        $(let $arg = <$arg_ty as $crate::byond::FromByondArg>::from_byond_arg($arg);)*
     };
 
     (@return $res:ident ->) => {
@@ -153,30 +157,30 @@ macro_rules! function {
         })
     }};
 
-    attr($(skip_hook = $skip_hook:literal)?) (fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $body:block) => {
+    attr($(skip_hook = $skip_hook:literal)?) (
+        $(#[$met:meta])*
+        fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $body:block
+    ) => {
+        $(#[$met])*
         #[unsafe(no_mangle)]
         #[allow(missing_docs, clippy::missing_safety_doc)]
         pub unsafe extern "C" fn $name(
-            _argc: ::std::ffi::c_int, _argv: *const *const ::std::ffi::c_char
+            __argc: ::std::ffi::c_int, __argv: *const *const ::std::ffi::c_char
         ) -> *const ::std::ffi::c_char {
             $crate::byond::function!(@panic_hook $($skip_hook)?);
-            $crate::byond::function!(@parse_args _argc, _argv; $($arg : $arg_ty),*);
-            let __result = $body;
+            $crate::byond::function!(@parse_args __argc, __argv, $($arg : $arg_ty),*);
+            let __result = (move || $body)();
             $crate::byond::function!(@return __result -> $($ret)?)
         }
     };
 }
 
-/// todo
-pub fn __parse_args2<const N: usize>(argc: u4c, argv: *mut CByondValue) -> [ByondValue; N] {
-    let mut args = [ByondValue::NULL; N];
-    for (i, arg) in args.iter_mut().enumerate().take((argc as usize).min(N)) {
-        *arg = unsafe { ByondValue(*argv.add(i)) };
-    }
-    args
-}
-
-/// todo
+/// Define a BYOND API-compatible exported function.
+///
+/// The macro wraps a Rust function body in an `unsafe extern "C-unwind"`
+/// function with BYOND API's typed value calling convention, parses arguments
+/// with meowtonin, installs the panic hook by default, and returns a detached
+/// BYOND value.
 macro_rules! byondapi {
     (@panic_hook) => {
         $crate::byond::__set_panic_hook();
@@ -187,8 +191,8 @@ macro_rules! byondapi {
 
     (@parse_args $argc:ident, $argv:ident,) => {};
     (@parse_args $argc:ident, $argv:ident, $($arg:ident : $arg_ty:ty),+) => {
-        let [$($arg),*] = $crate::byond::__parse_args2::<{ $crate::byond::__count_args!($($arg),*) }>($argc, $argv);
-        $(let $arg: $arg_ty = <$arg_ty as ::meowtonin::FromByond>::from_byond($arg).unwrap_or_default();)*
+        let [$($arg),*] = $crate::byond::__parse_bapi_args::<{ $crate::byond::__count_args!($($arg),*) }>($argc, $argv);
+        $(let $arg = <$arg_ty as ::meowtonin::FromByond>::from_byond($arg).unwrap_or_default();)*
     };
 
     (@return $res:ident ->) => {
@@ -198,15 +202,17 @@ macro_rules! byondapi {
         ::meowtonin::ByondValue::new_value::<$ret>($res).unwrap_or_default().detach()
     }};
 
-    // attr($(catch = $catch:literal)?)
-
-    attr() (fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $body:block) => {
+    attr($(skip_hook = $skip_hook:literal)?) (
+        $(#[$met:meta])*
+        fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $body:block
+    ) => {
+        $(#[$met])*
         #[unsafe(no_mangle)]
         #[allow(missing_docs, clippy::missing_safety_doc)]
         pub unsafe extern "C-unwind" fn $name(
             __argc: ::meowtonin::sys::u4c, __argv: *mut ::meowtonin::sys::CByondValue,
         ) -> ::meowtonin::sys::CByondValue {
-            // $crate::byond::byondapi!(@panic_hook $($skip_hook)?);
+            $crate::byond::byondapi!(@panic_hook $($skip_hook)?);
             $crate::byond::byondapi!(@parse_args __argc, __argv, $($arg : $arg_ty),*);
             let __result = (move || $body)();
             $crate::byond::byondapi!(@return __result -> $($ret)?)
@@ -216,5 +222,4 @@ macro_rules! byondapi {
 
 pub(crate) use __count_args;
 pub(crate) use byondapi;
-#[doc(inline)]
 pub(crate) use function;

@@ -5,7 +5,6 @@
 mod byond;
 mod control;
 
-use byond::byondapi;
 use meowtonin::ByondValue;
 use sada_common::ControlResponse;
 
@@ -39,34 +38,19 @@ fn void() {}
 #[byond::function]
 fn panicing() -> i32 {
     panic!("This function panics!");
-    #[allow(unreachable_code)]
-    1
 }
 
-/// todo
-///
-/// # Safety
-///
-/// todo
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn echo2(_argc: u32, _argv: *mut ByondValue) -> ByondValue {
-    ByondValue::new_string("byondapi works!")
-}
+#[byond::byondapi]
+fn echo_bapi(arg: String) -> String { arg }
 
-#[byondapi]
-fn echo3(arg: String) -> String { arg }
-
-#[byondapi]
-fn panicing2() -> i32 {
+#[byond::byondapi]
+fn panicing_bapi() -> i32 {
     panic!("This function panics too!");
-    #[allow(unreachable_code)]
-    1
 }
 
-#[byondapi]
+#[byond::byondapi]
 fn update_position(mob: ByondValue, x: i32, y: i32) {
     let Ok(name) = mob.read_var::<_, String>("name") else {
-        eprintln!("Failed to read mob name");
         return;
     };
 
