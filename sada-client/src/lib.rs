@@ -5,6 +5,7 @@
 mod byond;
 mod control;
 
+use meowtonin::ByondValue;
 use sada_common::ControlResponse;
 
 /// Encodes a [`ControlResponse`] into a JSON string. If encoding fails, returns an error message as JSON string.
@@ -37,6 +38,21 @@ fn void() {}
 #[byond::function]
 fn panicing() -> i32 {
     panic!("This function panics!");
-    #[allow(unreachable_code)]
-    1
+}
+
+#[byond::byondapi]
+fn echo_bapi(arg: String) -> String { arg }
+
+#[byond::byondapi]
+fn panicing_bapi() -> i32 {
+    panic!("This function panics too!");
+}
+
+#[byond::byondapi]
+fn update_position(mob: ByondValue, x: i32, y: i32) {
+    let Ok(name) = mob.read_var::<_, String>("name") else {
+        return;
+    };
+
+    println!("Updating position of {} to ({}, {})", name, x, y);
 }

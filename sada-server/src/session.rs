@@ -99,7 +99,7 @@ impl Room {
     /// Register a new session and return its room handle.
     fn join(&self) -> SessionRoom {
         SessionRoom {
-            id: SessionId(self.next_id.fetch_add(1, Ordering::Relaxed)),
+            id: SessionId(self.next_id.fetch_add(1, Ordering::AcqRel)),
             audio_tx: self.audio_tx.clone(),
             audio_rx: self.audio_tx.subscribe(),
         }
