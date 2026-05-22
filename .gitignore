@@ -4,3 +4,4 @@ target
 *.pdb
 **/mutants.out*/
 audio_dump*.wav
+node_modules
