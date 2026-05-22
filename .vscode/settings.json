@@ -16,4 +16,15 @@
     "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
+    // Ensures that all files end with a newline and removes trailing whitespace on save.
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
+    // Enforces consistent formatting using Biome.
+    "editor.codeActionsOnSave": {
+        "source.fixAll.biome": "explicit"
+    },
+    "[javascript][typescript][javascriptreact][typescriptreact][css][html][json][jsonc]": {
+        "editor.defaultFormatter": "biomejs.biome",
+        "editor.formatOnSave": true
+    }
 }
