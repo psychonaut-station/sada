@@ -57,17 +57,17 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>
 async fn handle_signaling(ws: WebSocket, state: Arc<AppState>) {
     info!("WebSocket client connected");
 
-    let (mut ws_tx, mut ws_rx) = ws.split();
+    let (mut ws_sink, mut ws_stream) = ws.split();
 
-    let mut ws_out_rx = None;
+    let mut ws_rx = None;
     let mut session_tx = None;
 
     loop {
         select! {
-            inbound = ws_rx.next() => if handle_incoming(&mut ws_tx, &inbound, &state, &mut ws_out_rx, &mut session_tx).await.is_break() {
+            inbound = ws_stream.next() => if handle_incoming(&mut ws_sink, &inbound, &state, &mut ws_rx, &mut session_tx).await.is_break() {
                 break;
             },
-            outbound = recv_outbound(&mut ws_out_rx) => if handle_outgoing(&mut ws_tx, outbound).await.is_break() {
+            outbound = recv_outbound(&mut ws_rx) => if handle_outgoing(&mut ws_sink, outbound).await.is_break() {
                 break;
             },
         }
@@ -76,10 +76,10 @@ async fn handle_signaling(ws: WebSocket, state: Arc<AppState>) {
 
 /// Handle a single message from the client WebSocket.
 async fn handle_incoming(
-    ws_tx: &mut SplitSink<WebSocket, Message>,
+    ws: &mut SplitSink<WebSocket, Message>,
     msg: &Option<Result<Message, axum::Error>>,
     state: &Arc<AppState>,
-    ws_out_rx: &mut Option<mpsc::Receiver<SignalMessage>>,
+    ws_rx: &mut Option<mpsc::Receiver<SignalMessage>>,
     session_tx: &mut Option<mpsc::Sender<SignalMessage>>,
 ) -> ControlFlow<()> {
     let Some(msg) = msg else {
@@ -110,7 +110,7 @@ async fn handle_incoming(
 
     match signal {
         SignalMessage::Offer { sdp } => {
-            if ws_out_rx.is_some() {
+            if ws_rx.is_some() {
                 warn!("received multiple offers in one session (ignored)");
                 return ControlFlow::Continue(());
             }
@@ -128,17 +128,17 @@ async fn handle_incoming(
             let answer_msg = SignalMessage::Answer { sdp: answer_sdp };
             let json = serde_json::to_string(&answer_msg).unwrap();
 
-            if let Err(err) = ws_tx.send(Message::Text(json.into())).await {
+            if let Err(err) = ws.send(Message::Text(json.into())).await {
                 error!(?err, "failed to send answer");
                 return ControlFlow::Continue(());
             }
 
             // Channel for messages from the session thread to the WebSocket thread.
-            let (ws_tx, ws_rx) = mpsc::channel(8);
+            let (ws_tx, ws_rx_) = mpsc::channel(8);
             // Channel for messages from the WebSocket thread to the session thread.
             let (ssn_tx, ssn_rx) = mpsc::channel(8);
 
-            *ws_out_rx = Some(ws_rx);
+            *ws_rx = Some(ws_rx_);
             *session_tx = Some(ssn_tx);
 
             tokio::spawn(session.build(ws_tx, ssn_rx, &state.room).run());
@@ -156,22 +156,19 @@ async fn handle_incoming(
 }
 
 /// Await a message from the session channel, or wait indefinitely if the channel is not set up.
-async fn recv_outbound(outbound_rx: &mut Option<mpsc::Receiver<SignalMessage>>) -> Option<SignalMessage> {
-    match outbound_rx {
+async fn recv_outbound(ws_rx: &mut Option<mpsc::Receiver<SignalMessage>>) -> Option<SignalMessage> {
+    match ws_rx {
         Some(rx) => rx.recv().await,
         None => future::pending().await,
     }
 }
 
 /// Handle a single outgoing message to the client WebSocket.
-async fn handle_outgoing(
-    ws_tx: &mut SplitSink<WebSocket, Message>,
-    outbound: Option<SignalMessage>,
-) -> ControlFlow<()> {
+async fn handle_outgoing(ws: &mut SplitSink<WebSocket, Message>, outbound: Option<SignalMessage>) -> ControlFlow<()> {
     match outbound {
         Some(msg) => {
             let json = serde_json::to_string(&msg).unwrap();
-            if let Err(err) = ws_tx.send(Message::Text(json.into())).await {
+            if let Err(err) = ws.send(Message::Text(json.into())).await {
                 error!(?err, "failed to send message to client");
                 return ControlFlow::Break(());
             }
