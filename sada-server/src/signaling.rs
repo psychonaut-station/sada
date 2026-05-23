@@ -60,10 +60,11 @@ async fn handle_signaling(ws: WebSocket, state: Arc<AppState>) {
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     let mut ws_out_rx = None;
+    let mut session_tx = None;
 
     loop {
         select! {
-            inbound = ws_rx.next() => if handle_incoming(&mut ws_tx, &inbound, &state, &mut ws_out_rx).await.is_break() {
+            inbound = ws_rx.next() => if handle_incoming(&mut ws_tx, &inbound, &state, &mut ws_out_rx, &mut session_tx).await.is_break() {
                 break;
             },
             outbound = recv_outbound(&mut ws_out_rx) => if handle_outgoing(&mut ws_tx, outbound).await.is_break() {
@@ -79,6 +80,7 @@ async fn handle_incoming(
     msg: &Option<Result<Message, axum::Error>>,
     state: &Arc<AppState>,
     ws_out_rx: &mut Option<mpsc::Receiver<SignalMessage>>,
+    session_tx: &mut Option<mpsc::Sender<SignalMessage>>,
 ) -> ControlFlow<()> {
     let Some(msg) = msg else {
         info!("WebSocket closed ungracefully by client");
@@ -131,10 +133,15 @@ async fn handle_incoming(
                 return ControlFlow::Continue(());
             }
 
-            let (tx, rx) = mpsc::channel(8);
-            *ws_out_rx = Some(rx);
+            // Channel for messages from the session thread to the WebSocket thread.
+            let (ws_tx, ws_rx) = mpsc::channel(8);
+            // Channel for messages from the WebSocket thread to the session thread.
+            let (ssn_tx, ssn_rx) = mpsc::channel(8);
 
-            tokio::spawn(session.build(tx, &state.room).run());
+            *ws_out_rx = Some(ws_rx);
+            *session_tx = Some(ssn_tx);
+
+            tokio::spawn(session.build(ws_tx, ssn_rx, &state.room).run());
         },
         SignalMessage::Answer { .. } => {
             warn!("unexpected Answer from client (ignored)");

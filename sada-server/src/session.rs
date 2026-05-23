@@ -180,6 +180,8 @@ pub struct Session {
     sink: AudioSink,
     /// Sender for outgoing messages to the client WebSocket.
     _ws_tx: mpsc::Sender<SignalMessage>,
+    /// Receiver for incoming messages from the client WebSocket.
+    _session_rx: mpsc::Receiver<SignalMessage>,
 }
 
 impl Session {
@@ -351,7 +353,12 @@ impl SessionBuilder {
     }
 
     /// Join the room and finish the session with an outgoing signaling sender.
-    pub fn build(self, ws_tx: mpsc::Sender<SignalMessage>, room: &Room) -> Session {
+    pub fn build(
+        self,
+        ws_tx: mpsc::Sender<SignalMessage>,
+        session_rx: mpsc::Receiver<SignalMessage>,
+        room: &Room,
+    ) -> Session {
         let session_room = room.join();
         let id = session_room.id.0;
 
@@ -361,6 +368,7 @@ impl SessionBuilder {
             room: session_room,
             sink: AudioSink::new(id),
             _ws_tx: ws_tx,
+            _session_rx: session_rx,
         }
     }
 }
