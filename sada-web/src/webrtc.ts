@@ -12,6 +12,7 @@ export class WebRTCManager {
     private readonly signaling: SignalingClient;
     private readonly events: CallEvents;
     private remoteStream: MediaStream;
+    private signalingQueue: Promise<void> = Promise.resolve();
 
     constructor(signaling: SignalingClient, events: CallEvents, iceServers?: RTCIceServer[]) {
         this.signaling = signaling;
@@ -23,8 +24,11 @@ export class WebRTCManager {
         this.remoteStream = new MediaStream();
 
         this.peerConnection.ontrack = (ev) => {
-            ev.streams[0]?.getTracks().forEach((track) => {
-                this.remoteStream.addTrack(track);
+            const tracks = ev.streams[0]?.getTracks() ?? [ev.track];
+            tracks.forEach((track) => {
+                if (!this.remoteStream.getTracks().includes(track)) {
+                    this.remoteStream.addTrack(track);
+                }
             });
             this.events.onRemoteTrack(this.remoteStream);
         };
@@ -52,23 +56,7 @@ export class WebRTCManager {
     async createOffer(): Promise<void> {
         const offer = await this.peerConnection.createOffer();
         await this.peerConnection.setLocalDescription(offer);
-
-        // Wait for ICE gathering to finish so all candidates are bundled
-        // in the offer SDP. The check guards against the rare case where
-        // gathering is already complete before we attach the listener.
-        await new Promise<void>((resolve) => {
-            if (this.peerConnection.iceGatheringState === "complete") {
-                resolve();
-                return;
-            }
-            const handler = () => {
-                if (this.peerConnection.iceGatheringState === "complete") {
-                    this.peerConnection.removeEventListener("icegatheringstatechange", handler);
-                    resolve();
-                }
-            };
-            this.peerConnection.addEventListener("icegatheringstatechange", handler);
-        });
+        await this.waitForIceGathering();
 
         this.signaling.send({
             type: "offer",
@@ -78,7 +66,25 @@ export class WebRTCManager {
     }
 
     async applyAnswer(sdp: string): Promise<void> {
-        await this.peerConnection.setRemoteDescription({ type: "answer", sdp });
+        return this.enqueueSignaling(() =>
+            this.peerConnection.setRemoteDescription({ type: "answer", sdp }),
+        );
+    }
+
+    async applyOffer(sdp: string, negotiationId: number): Promise<void> {
+        return this.enqueueSignaling(async () => {
+            await this.peerConnection.setRemoteDescription({ type: "offer", sdp });
+            const answer = await this.peerConnection.createAnswer();
+            await this.peerConnection.setLocalDescription(answer);
+            await this.waitForIceGathering();
+
+            this.signaling.send({
+                type: "answer",
+                // biome-ignore lint/style/noNonNullAssertion: it's set just above
+                sdp: this.peerConnection.localDescription!.sdp,
+                negotiationId,
+            });
+        });
     }
 
     toggleMute(): boolean {
@@ -101,5 +107,30 @@ export class WebRTCManager {
         try {
             this.peerConnection.close();
         } catch {}
+    }
+
+    private waitForIceGathering(): Promise<void> {
+        // Wait for ICE gathering to finish so all candidates are bundled
+        // in the SDP. The check guards against the rare case where
+        // gathering is already complete before we attach the listener.
+        return new Promise<void>((resolve) => {
+            if (this.peerConnection.iceGatheringState === "complete") {
+                resolve();
+                return;
+            }
+            const handler = () => {
+                if (this.peerConnection.iceGatheringState === "complete") {
+                    this.peerConnection.removeEventListener("icegatheringstatechange", handler);
+                    resolve();
+                }
+            };
+            this.peerConnection.addEventListener("icegatheringstatechange", handler);
+        });
+    }
+
+    private enqueueSignaling(task: () => Promise<void>): Promise<void> {
+        const next = this.signalingQueue.then(task, task);
+        this.signalingQueue = next.catch(() => {});
+        return next;
     }
 }

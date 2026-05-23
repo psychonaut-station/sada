@@ -192,6 +192,18 @@ export class Sada extends LitElement {
                     console.error("applyAnswer failed", e);
                 });
                 break;
+            case "offer":
+                this.rtc?.applyOffer(message.sdp, message.negotiationId).catch((e) => {
+                    console.error("applyOffer failed", e);
+                    this.cleanup();
+                });
+                break;
+            case "track_map":
+                console.debug("track map", message.tracks);
+                break;
+            case "close":
+                this.cleanup();
+                break;
         }
     }
 
