@@ -289,8 +289,9 @@ impl Session {
                     warn!(?err, "audio relay has no receivers");
                 }
             },
+            Event::SenderFeedback(_) => {},
             _ => debug!(?event, "unhandled event"),
-        }
+        };
         Loop::Continue
     }
 
