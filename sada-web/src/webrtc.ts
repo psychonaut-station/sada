@@ -16,6 +16,7 @@ export class WebRTCManager {
     constructor(signaling: SignalingClient, events: CallEvents, iceServers?: RTCIceServer[]) {
         this.signaling = signaling;
         this.events = events;
+
         this.peerConnection = new RTCPeerConnection({
             iceServers: iceServers ?? config.iceServers.map((url) => ({ urls: url })),
         });
@@ -71,7 +72,8 @@ export class WebRTCManager {
 
         this.signaling.send({
             type: "offer",
-            sdp: this.peerConnection.localDescription?.sdp ?? "",
+            // biome-ignore lint/style/noNonNullAssertion: it's set just above
+            sdp: this.peerConnection.localDescription!.sdp,
         });
     }
 
