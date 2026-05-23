@@ -59,15 +59,14 @@ async fn handle_signaling(ws: WebSocket, state: Arc<AppState>) {
 
     let (mut ws_tx, mut ws_rx) = ws.split();
 
-    let mut outbound_tx: Option<mpsc::Sender<SignalMessage>> = None;
-    let mut outbound_rx: Option<mpsc::Receiver<SignalMessage>> = None;
+    let mut ws_out_rx = None;
 
     loop {
         select! {
-            inbound = ws_rx.next() => if handle_incoming(&mut ws_tx, &inbound, &state, &mut outbound_tx, &mut outbound_rx).await.is_break() {
+            inbound = ws_rx.next() => if handle_incoming(&mut ws_tx, &inbound, &state, &mut ws_out_rx).await.is_break() {
                 break;
             },
-            outbound = recv_outbound(&mut outbound_rx) => if handle_outgoing(&mut ws_tx, outbound).await.is_break() {
+            outbound = recv_outbound(&mut ws_out_rx) => if handle_outgoing(&mut ws_tx, outbound).await.is_break() {
                 break;
             },
         }
@@ -79,8 +78,7 @@ async fn handle_incoming(
     ws_tx: &mut SplitSink<WebSocket, Message>,
     msg: &Option<Result<Message, axum::Error>>,
     state: &Arc<AppState>,
-    outbound_tx: &mut Option<mpsc::Sender<SignalMessage>>,
-    outbound_rx: &mut Option<mpsc::Receiver<SignalMessage>>,
+    ws_out_rx: &mut Option<mpsc::Receiver<SignalMessage>>,
 ) -> ControlFlow<()> {
     let Some(msg) = msg else {
         info!("WebSocket closed ungracefully by client");
@@ -110,9 +108,7 @@ async fn handle_incoming(
 
     match signal {
         SignalMessage::Offer { sdp } => {
-            // could be simplified to just outbound_tx.is_some() since they are
-            // always set together but it's safer to check both just in case
-            if outbound_tx.is_some() || outbound_rx.is_some() {
+            if ws_out_rx.is_some() {
                 warn!("received multiple offers in one session (ignored)");
                 return ControlFlow::Continue(());
             }
@@ -136,8 +132,7 @@ async fn handle_incoming(
             }
 
             let (tx, rx) = mpsc::channel(8);
-            *outbound_tx = Some(tx.clone());
-            *outbound_rx = Some(rx);
+            *ws_out_rx = Some(rx);
 
             tokio::spawn(session.build(tx, &state.room).run());
         },
