@@ -30,10 +30,13 @@ use thiserror::Error;
 use tokio::{
     net::UdpSocket,
     select,
-    sync::broadcast::{self, Receiver, Sender, error::RecvError},
+    sync::{
+        broadcast::{self, Receiver, Sender, error::RecvError},
+        mpsc,
+    },
 };
 
-use crate::{config::WebRtcConfig, media::AudioSink};
+use crate::{media::AudioSink, signaling::AppState};
 
 /// Result type used by session setup.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -172,44 +175,11 @@ pub struct Session {
     room: SessionRoom,
     /// Debug audio sink.
     sink: AudioSink,
+    /// Sender for outgoing messages to the client WebSocket.
+    _ws_tx: mpsc::Sender<String>,
 }
 
 impl Session {
-    /// Create a session from a remote SDP offer and return the SDP answer.
-    pub async fn from_offer(offer_sdp: &str, webrtc_config: &WebRtcConfig, room: &Room) -> Result<(Self, String)> {
-        let offer = SdpOffer::from_sdp_string(offer_sdp).map_err(Error::ParseOffer)?;
-
-        let mut rtc = RtcConfig::new().clear_codecs().enable_opus(true).build(Instant::now());
-
-        let host_ip = match webrtc_config.host_ip {
-            Some(ip) => ip,
-            None => auto_host_address()?,
-        };
-        let socket = UdpSocket::bind((host_ip, 0))
-            .await
-            .map_err(|s| Error::BindUdpSocket(host_ip, s))?;
-        let addr = socket.local_addr().map_err(Error::LocalSocketAddress)?;
-        let candidate = Candidate::host(addr, "udp").map_err(Error::CreateHostCandidate)?;
-        rtc.add_local_candidate(candidate).ok_or(Error::AddLocalCandidate)?;
-
-        let answer = rtc.sdp_api().accept_offer(offer).map_err(Error::AcceptOffer)?;
-
-        let answer_sdp = answer.to_sdp_string();
-
-        let session_room = room.join();
-        let session_id = session_room.id;
-
-        Ok((
-            Self {
-                rtc,
-                socket,
-                room: session_room,
-                sink: AudioSink::new(session_id.0),
-            },
-            answer_sdp,
-        ))
-    }
-
     /// Run the session event loop until the peer disconnects or an error occurs.
     pub async fn run(mut self) {
         info!("str0m run loop started");
@@ -345,6 +315,53 @@ impl Session {
     }
 }
 
+/// Partially constructed session created while accepting a WebRTC offer.
+pub struct SessionBuilder {
+    /// WebRTC instance.
+    rtc: Rtc,
+    /// UDP socket used for ICE and RTP traffic.
+    socket: UdpSocket,
+}
+
+impl SessionBuilder {
+    /// Create a session builder from a remote SDP offer and return the SDP answer.
+    pub async fn from_offer(offer_sdp: &str, state: &Arc<AppState>) -> Result<(Self, String)> {
+        let offer = SdpOffer::from_sdp_string(offer_sdp).map_err(Error::ParseOffer)?;
+
+        let mut rtc = RtcConfig::new().clear_codecs().enable_opus(true).build(Instant::now());
+
+        let ip = match state.config.webrtc.host_ip {
+            Some(ip) => ip,
+            None => auto_host_address()?,
+        };
+
+        let socket = UdpSocket::bind((ip, 0)).await.map_err(|s| Error::BindSocket(ip, s))?;
+        let addr = socket.local_addr().map_err(Error::LocalSocketAddress)?;
+        let candidate = Candidate::host(addr, "udp").map_err(Error::CreateHostCandidate)?;
+        rtc.add_local_candidate(candidate).ok_or(Error::AddLocalCandidate)?;
+
+        let answer = rtc.sdp_api().accept_offer(offer).map_err(Error::AcceptOffer)?;
+
+        let answer_sdp = answer.to_sdp_string();
+
+        Ok((Self { rtc, socket }, answer_sdp))
+    }
+
+    /// Join the room and finish the session with an outgoing signaling sender.
+    pub fn build(self, ws_tx: mpsc::Sender<String>, room: &Room) -> Session {
+        let session_room = room.join();
+        let id = session_room.id.0;
+
+        Session {
+            rtc: self.rtc,
+            socket: self.socket,
+            room: session_room,
+            sink: AudioSink::new(id),
+            _ws_tx: ws_tx,
+        }
+    }
+}
+
 /// Errors that can happen while creating a WebRTC session.
 #[derive(Debug, Error)]
 pub enum Error {
@@ -359,7 +376,7 @@ pub enum Error {
     NoUsableNetworkInterface,
     /// The UDP socket for WebRTC traffic could not be bound.
     #[error("failed to bind UDP socket to {0}")]
-    BindUdpSocket(IpAddr, #[source] io::Error),
+    BindSocket(IpAddr, #[source] io::Error),
     /// The bound UDP socket's local address could not be read.
     #[error("failed to get local socket address")]
     LocalSocketAddress(#[source] io::Error),
