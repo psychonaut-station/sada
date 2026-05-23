@@ -36,7 +36,10 @@ use tokio::{
     },
 };
 
-use crate::{media::AudioSink, signaling::AppState};
+use crate::{
+    media::AudioSink,
+    signaling::{AppState, SignalMessage},
+};
 
 /// Result type used by session setup.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -176,7 +179,7 @@ pub struct Session {
     /// Debug audio sink.
     sink: AudioSink,
     /// Sender for outgoing messages to the client WebSocket.
-    _ws_tx: mpsc::Sender<String>,
+    _ws_tx: mpsc::Sender<SignalMessage>,
 }
 
 impl Session {
@@ -348,7 +351,7 @@ impl SessionBuilder {
     }
 
     /// Join the room and finish the session with an outgoing signaling sender.
-    pub fn build(self, ws_tx: mpsc::Sender<String>, room: &Room) -> Session {
+    pub fn build(self, ws_tx: mpsc::Sender<SignalMessage>, room: &Room) -> Session {
         let session_room = room.join();
         let id = session_room.id.0;
 

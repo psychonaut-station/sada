@@ -59,21 +59,16 @@ async fn handle_signaling(ws: WebSocket, state: Arc<AppState>) {
 
     let (mut ws_tx, mut ws_rx) = ws.split();
 
-    let mut outbound_tx: Option<mpsc::Sender<String>> = None;
-    let mut outbound_rx: Option<mpsc::Receiver<String>> = None;
+    let mut outbound_tx: Option<mpsc::Sender<SignalMessage>> = None;
+    let mut outbound_rx: Option<mpsc::Receiver<SignalMessage>> = None;
 
     loop {
         select! {
-            inbound = ws_rx.next() => match handle_incoming(&mut ws_tx, &inbound, &state, &mut outbound_tx, &mut outbound_rx).await {
-                ControlFlow::Continue(()) => continue,
-                ControlFlow::Break(()) => break,
+            inbound = ws_rx.next() => if handle_incoming(&mut ws_tx, &inbound, &state, &mut outbound_tx, &mut outbound_rx).await.is_break() {
+                break;
             },
-            outbound = async { match &mut outbound_rx {
-                Some(rx) => rx.recv().await,
-                None => future::pending().await,
-            } } => match handle_outgoing(&mut ws_tx, outbound).await {
-                ControlFlow::Continue(()) => continue,
-                ControlFlow::Break(()) => break,
+            outbound = recv_outbound(&mut outbound_rx) => if handle_outgoing(&mut ws_tx, outbound).await.is_break() {
+                break;
             },
         }
     }
@@ -84,8 +79,8 @@ async fn handle_incoming(
     ws_tx: &mut SplitSink<WebSocket, Message>,
     msg: &Option<Result<Message, axum::Error>>,
     state: &Arc<AppState>,
-    outbound_tx: &mut Option<mpsc::Sender<String>>,
-    outbound_rx: &mut Option<mpsc::Receiver<String>>,
+    outbound_tx: &mut Option<mpsc::Sender<SignalMessage>>,
+    outbound_rx: &mut Option<mpsc::Receiver<SignalMessage>>,
 ) -> ControlFlow<()> {
     let Some(msg) = msg else {
         info!("WebSocket closed ungracefully by client");
@@ -158,11 +153,23 @@ async fn handle_incoming(
     ControlFlow::Continue(())
 }
 
+/// Await a message from the session channel, or wait indefinitely if the channel is not set up.
+async fn recv_outbound(outbound_rx: &mut Option<mpsc::Receiver<SignalMessage>>) -> Option<SignalMessage> {
+    match outbound_rx {
+        Some(rx) => rx.recv().await,
+        None => future::pending().await,
+    }
+}
+
 /// Handle a single outgoing message to the client WebSocket.
-async fn handle_outgoing(ws_tx: &mut SplitSink<WebSocket, Message>, outbound: Option<String>) -> ControlFlow<()> {
+async fn handle_outgoing(
+    ws_tx: &mut SplitSink<WebSocket, Message>,
+    outbound: Option<SignalMessage>,
+) -> ControlFlow<()> {
     match outbound {
         Some(msg) => {
-            if let Err(err) = ws_tx.send(Message::Text(msg.into())).await {
+            let json = serde_json::to_string(&msg).unwrap();
+            if let Err(err) = ws_tx.send(Message::Text(json.into())).await {
                 error!(?err, "failed to send message to client");
                 return ControlFlow::Break(());
             }
