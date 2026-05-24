@@ -330,7 +330,7 @@ impl Session {
             },
             Ok(Output::Event(event)) => self.handle_event(event),
             Err(err) => {
-                error!(?err, "str0m poll_output error");
+                debug!(?err, "str0m poll_output error");
                 Loop::Done
             },
         }

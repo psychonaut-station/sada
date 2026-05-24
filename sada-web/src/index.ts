@@ -209,10 +209,10 @@ export class Sada extends LitElement {
     }
 
     private cleanup(): void {
-        this.rtc?.hangup();
-        this.rtc = undefined;
         this.signalling?.close();
         this.signalling = undefined;
+        this.rtc?.hangup();
+        this.rtc = undefined;
         if (this.remoteAudio) {
             this.remoteAudio.srcObject = null;
         }
