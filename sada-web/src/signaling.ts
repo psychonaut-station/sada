@@ -3,15 +3,9 @@ export type ClientMessage =
     | { type: "answer"; sdp: string }
     | { type: "close" };
 
-export type TrackMapEntry = {
-    speakerId: string | null;
-    mid: string | null;
-};
-
 export type ServerMessage =
     | { type: "answer"; sdp: string }
     | { type: "offer"; sdp: string }
-    | { type: "track_map"; tracks: TrackMapEntry[] }
     | { type: "close" };
 
 export type SignalingHandlers = {
@@ -104,20 +98,6 @@ export class SignalingClient {
                 const sdp = str("sdp");
                 if (!sdp) return null;
                 return { type: "offer", sdp };
-            }
-            case "track_map": {
-                if (!Array.isArray(obj.tracks)) return null;
-                const tracks: TrackMapEntry[] = [];
-                for (const track of obj.tracks) {
-                    if (typeof track !== "object" || track === null) return null;
-                    const entry = track as Record<string, unknown>;
-                    const speakerId = entry.speakerId;
-                    const mid = entry.mid;
-                    if (speakerId !== null && typeof speakerId !== "string") return null;
-                    if (mid !== null && typeof mid !== "string") return null;
-                    tracks.push({ speakerId, mid });
-                }
-                return { type: "track_map", tracks };
             }
             case "close":
                 return { type: "close" };

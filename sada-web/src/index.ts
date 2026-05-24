@@ -199,9 +199,6 @@ export class Sada extends LitElement {
                     this.cleanup();
                 });
                 break;
-            case "track_map":
-                console.debug("track map", message.tracks);
-                break;
             case "close":
                 this.cleanup();
                 break;
