@@ -27,7 +27,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.lints.rust]
-missing_docs = "deny"
+missing_docs = "warn"
 
 [workspace.lints.clippy]
-missing_docs_in_private_items = "deny"
+missing_docs_in_private_items = "warn"

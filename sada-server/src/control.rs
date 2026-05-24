@@ -98,7 +98,9 @@ async fn read_frame(reader: &mut OwnedReadHalf, buffer: &mut ControlFrameBuffer)
 
 /// Write one length-prefixed postcard control frame.
 async fn write_frame<T: serde::Serialize>(
-    writer: &mut OwnedWriteHalf, buffer: &mut ControlFrameBuffer, value: &T,
+    writer: &mut OwnedWriteHalf,
+    buffer: &mut ControlFrameBuffer,
+    value: &T,
 ) -> Result<()> {
     let payload = buffer.encode(value).map_err(Error::EncodeFrame)?;
     let len = u32::try_from(payload.len()).map_err(Error::EncodeFrameTooLarge)?;
