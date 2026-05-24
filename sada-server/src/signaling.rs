@@ -28,15 +28,21 @@ pub struct AppState {
 }
 
 /// Message exchanged over the signaling WebSocket.
+///
+/// The same message shape is used in both directions, but the meaning depends on
+/// who sent it. A client `Offer` starts a new session, while a server `Offer`
+/// asks the existing client session to renegotiate. An `Answer` always completes
+/// the most recent offer sent by the other side. `Close` is a graceful shutdown
+/// request from either side.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SignalMessage {
-    /// SDP offer sent by a client when joining, or by the server during renegotiation.
+    /// SDP offer that starts a call or requests renegotiation.
     Offer {
         /// Session description payload.
         sdp: String,
     },
-    /// SDP answer sent after accepting an offer from the other side.
+    /// SDP answer for the most recent offer sent by the other side.
     Answer {
         /// Session description payload.
         sdp: String,
