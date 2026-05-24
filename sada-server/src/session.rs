@@ -4,7 +4,6 @@ use std::{
     collections::HashMap,
     io,
     net::IpAddr,
-    ops::Deref,
     sync::{
         Arc,
         OnceLock,
@@ -50,12 +49,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Identifier assigned to a connected WebRTC session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(u32);
-
-impl Deref for SessionId {
-    type Target = u32;
-
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
 
 /// Audio frame forwarded between sessions.
 #[derive(Clone, Debug)]
@@ -145,6 +138,14 @@ impl Drop for SessionRoom {
     }
 }
 
+/// Local SDP offer waiting for a client answer.
+struct PendingNegotiation {
+    /// str0m handle required to accept the corresponding answer.
+    offer: SdpPendingOffer,
+    /// Locally-created media slots that become writable after the answer is accepted.
+    mids: Vec<Mid>,
+}
+
 /// Select the first usable non-loopback IPv4 address from the host.
 fn select_host_address() -> Result<IpAddr> {
     let system = System::new();
@@ -209,19 +210,17 @@ pub struct Session {
     available_audio_mids: Vec<Mid>,
     /// Mapping from remote speaker sessions to their outgoing audio slot.
     remote_audio_mids: HashMap<SessionId, Mid>,
-    /// In-flight local SDP offer and the media slots that become usable after its answer.
-    pending_negotiation: Option<(SdpPendingOffer, Vec<Mid>)>,
-    /// Last ICE connection state observed from str0m.
-    connection_state: IceConnectionState,
+    /// In-flight local SDP offer.
+    pending_negotiation: Option<PendingNegotiation>,
 }
 
 impl Session {
     /// Maximum UDP datagram size accepted for WebRTC input.
     const BUFFER_SIZE: usize = 65535;
 
-    /// Return the room-scoped identifier for this session.
+    /// Return the numeric room-scoped identifier for this session.
     #[inline]
-    fn id(&self) -> SessionId { self.room.id }
+    fn id(&self) -> u32 { self.room.id.0 }
 
     /// Run the session event loop until the peer disconnects or an error occurs.
     pub async fn run(mut self) {
@@ -253,7 +252,7 @@ impl Session {
                             self.release_forwarded_audio(origin);
                         }
                         Err(RecvError::Lagged(skipped)) => {
-                            warn!(session_id = *self.id(), skipped, "audio relay receiver lagged");
+                            warn!(session_id = self.id(), skipped, "audio relay receiver lagged");
                         }
                         Err(RecvError::Closed) => {
                             break;
@@ -262,28 +261,28 @@ impl Session {
                 }
                 signal = self.signal_rx.recv() => {
                     let Some(signal) = signal else {
-                        info!(session_id = *self.id(), "signaling session closed by client");
+                        info!(session_id = self.id(), "signaling session closed by client");
                         break;
                     };
                     match signal {
                         SignalMessage::Answer { sdp } => {
-                            let Some((pending, mids)) = self.pending_negotiation.take() else {
-                                warn!(session_id = *self.id(), "unexpected client answer without pending offer");
+                            let Some(pending) = self.pending_negotiation.take() else {
+                                warn!(session_id = self.id(), "unexpected client answer without pending offer");
                                 continue;
                             };
 
                             let Ok(answer) = SdpAnswer::from_sdp_string(&sdp) else {
-                                warn!(session_id = *self.id(), "failed to parse client answer SDP");
+                                warn!(session_id = self.id(), "failed to parse client answer SDP");
                                 continue;
                             };
-                            if let Err(err) = self.rtc.sdp_api().accept_answer(pending, answer) {
-                                warn!(session_id = *self.id(), ?err, "failed to accept client answer");
+                            if let Err(err) = self.rtc.sdp_api().accept_answer(pending.offer, answer) {
+                                warn!(session_id = self.id(), ?err, "failed to accept client answer");
                                 continue;
                             }
 
-                            debug!(session_id = *self.id(), "client answer accepted, negotiation complete");
+                            debug!(session_id = self.id(), "client answer accepted, negotiation complete");
 
-                            self.available_audio_mids.extend(mids);
+                            self.available_audio_mids.extend(pending.mids);
                         }
                         SignalMessage::Offer { .. } => {}, // unreachable
                         SignalMessage::Close => break,
@@ -341,18 +340,17 @@ impl Session {
     fn handle_event(&mut self, event: Event) -> Loop {
         match event {
             Event::Connected => {
-                info!(session_id = *self.id(), "WebRTC peer connected");
+                info!(session_id = self.id(), "WebRTC peer connected");
             },
             Event::IceConnectionStateChange(IceConnectionState::Disconnected) => {
-                info!(session_id = *self.id(), "ICE disconnected, ending run loop");
+                info!(session_id = self.id(), "ICE disconnected, ending run loop");
                 return Loop::Done;
             },
             Event::IceConnectionStateChange(state) => {
-                info!(session_id = *self.id(), ?state, "ICE connection state change");
-                self.connection_state = state;
+                info!(session_id = self.id(), ?state, "ICE connection state change");
             },
             Event::MediaAdded(ma) => {
-                info!(session_id = *self.id(), mid = ?ma.mid, kind = ?ma.kind, "media added");
+                info!(session_id = self.id(), mid = ?ma.mid, kind = ?ma.kind, "media added");
                 if ma.kind == MediaKind::Audio && ma.direction.is_sending() {
                     self.available_audio_mids.push(ma.mid);
                 }
@@ -364,18 +362,18 @@ impl Session {
                     .room_tx
                     .send(RoomEvent::Audio(ForwardedAudio::new(self.room.id, data)))
                 {
-                    warn!(session_id = *self.id(), ?err, "audio relay has no receivers");
+                    warn!(session_id = self.id(), ?err, "audio relay has no receivers");
                 }
             },
             Event::SenderFeedback(_) | Event::StreamPaused(_) => {},
-            _ => debug!(session_id = *self.id(), ?event, "unhandled event"),
+            _ => debug!(session_id = self.id(), ?event, "unhandled event"),
         };
         Loop::Continue
     }
 
     /// Write audio received from another session to this WebRTC peer.
     async fn handle_forwarded_audio(&mut self, frame: ForwardedAudio) {
-        if !self.connection_state.is_connected() {
+        if !self.rtc.is_connected() {
             return;
         }
 
@@ -385,19 +383,19 @@ impl Session {
 
         let Some(mid) = self.forwarded_audio_mid(frame.origin) else {
             #[cfg(debug_assertions)]
-            debug!(session_id = *self.id(), ?frame.origin, "no available media slot for forwarded audio");
+            debug!(session_id = self.id(), ?frame.origin, "no available media slot for forwarded audio");
             self.request_negotiation().await;
             return;
         };
 
         let Some(writer) = self.rtc.writer(mid) else {
-            warn!(session_id = *self.id(), ?mid, "no writer for forwarded audio");
+            warn!(session_id = self.id(), ?mid, "no writer for forwarded audio");
             return;
         };
 
         let Some(pt) = writer.match_params(frame.params) else {
             warn!(
-                session_id = *self.id(),
+                session_id = self.id(),
                 ?mid,
                 "no matching payload type for forwarded audio"
             );
@@ -409,7 +407,7 @@ impl Session {
                 .start_of_talkspurt(frame.start_of_talkspurt)
                 .write(pt, frame.network_time, frame.time, frame.data)
         {
-            warn!(session_id = *self.id(), ?err, "failed to write forwarded audio");
+            warn!(session_id = self.id(), ?err, "failed to write forwarded audio");
         }
     }
 
@@ -465,9 +463,9 @@ impl Session {
             return;
         }
 
-        self.pending_negotiation = Some((pending, mids));
+        self.pending_negotiation = Some(PendingNegotiation { offer: pending, mids });
 
-        debug!(current, desired, session_id = *self.id(), "requested renegotiation");
+        debug!(current, desired, session_id = self.id(), "requested renegotiation");
     }
 }
 
@@ -523,7 +521,6 @@ impl SessionBuilder {
             available_audio_mids: Vec::new(),
             remote_audio_mids: HashMap::new(),
             pending_negotiation: None,
-            connection_state: IceConnectionState::New,
         }
     }
 }
