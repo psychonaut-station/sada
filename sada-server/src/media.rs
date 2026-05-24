@@ -22,7 +22,7 @@ pub struct AudioSink {
 
 impl AudioSink {
     /// Create a new audio sink.
-    pub fn new(id: u64) -> Self {
+    pub fn new(id: u32) -> Self {
         let dumper = if cfg!(feature = "audio_dump") {
             let path = format!("audio_dump_{id}.wav");
             match AudioDumper::create(&path) {
@@ -51,6 +51,7 @@ impl AudioSink {
         self.frame_count += 1;
         self.byte_count += data.data.len() as u64;
 
+        #[cfg(debug_assertions)]
         if self.frame_count <= 5 || self.frame_count.is_multiple_of(500) {
             info!(
                 frame = self.frame_count,
@@ -62,6 +63,7 @@ impl AudioSink {
             );
         }
 
+        #[cfg(debug_assertions)]
         if let Some(dumper) = &mut self.dumper
             && let Err(err) = dumper.write_frame(&data.data)
             && (self.frame_count <= 3 || self.frame_count.is_multiple_of(100))

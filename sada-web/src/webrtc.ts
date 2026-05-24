@@ -67,11 +67,11 @@ export class WebRTCManager {
 
     async applyAnswer(sdp: string): Promise<void> {
         return this.enqueueSignaling(() =>
-            this.peerConnection.setRemoteDescription({ type: "answer", sdp }),
+            this.peerConnection.setRemoteDescription({ type: "answer", sdp })
         );
     }
 
-    async applyOffer(sdp: string, negotiationId: number): Promise<void> {
+    async applyOffer(sdp: string): Promise<void> {
         return this.enqueueSignaling(async () => {
             await this.peerConnection.setRemoteDescription({ type: "offer", sdp });
             const answer = await this.peerConnection.createAnswer();
@@ -82,8 +82,9 @@ export class WebRTCManager {
                 type: "answer",
                 // biome-ignore lint/style/noNonNullAssertion: it's set just above
                 sdp: this.peerConnection.localDescription!.sdp,
-                negotiationId,
             });
+
+            console.debug("negotiation offer applied and answer sent");
         });
     }
 

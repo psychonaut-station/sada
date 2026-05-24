@@ -1,12 +1,14 @@
 //! WebRTC session setup and event loop handling.
 
 use std::{
+    collections::HashMap,
     io,
     net::IpAddr,
+    ops::Deref,
     sync::{
         Arc,
         OnceLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, Ordering},
     },
     time::Instant,
 };
@@ -19,10 +21,10 @@ use str0m::{
     Output,
     Rtc,
     RtcConfig,
-    change::SdpOffer,
+    change::{SdpAnswer, SdpOffer, SdpPendingOffer},
     error::{IceError, RtcError, SdpError},
     format::PayloadParams,
-    media::{MediaData, MediaTime, Mid},
+    media::{Direction, MediaData, MediaKind, MediaTime, Mid},
     net::{Protocol, Receive},
 };
 use systemstat::{Platform, System};
@@ -34,6 +36,7 @@ use tokio::{
         broadcast::{self, Receiver, Sender, error::RecvError},
         mpsc,
     },
+    time,
 };
 
 use crate::{
@@ -45,16 +48,20 @@ use crate::{
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Identifier assigned to a connected WebRTC session.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionId(u64);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SessionId(u32);
+
+impl Deref for SessionId {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
 
 /// Audio frame forwarded between sessions.
 #[derive(Clone, Debug)]
 struct ForwardedAudio {
     /// Session that produced the frame.
     origin: SessionId,
-    /// Media identifier to write the frame to.
-    mid: Mid,
     /// Codec payload parameters from the incoming frame.
     params: PayloadParams,
     /// RTP media timestamp.
@@ -72,7 +79,6 @@ impl ForwardedAudio {
     fn new(origin: SessionId, data: MediaData) -> Self {
         Self {
             origin,
-            mid: data.mid,
             params: data.params,
             time: data.time,
             network_time: data.network_time,
@@ -86,19 +92,19 @@ impl ForwardedAudio {
 #[derive(Clone)]
 pub struct Room {
     /// Counter used to allocate session IDs.
-    next_id: Arc<AtomicU64>,
-    /// Broadcast channel carrying encoded audio frames.
-    audio_tx: Sender<ForwardedAudio>,
+    next_id: Arc<AtomicU32>,
+    /// Broadcast channel carrying room-wide audio and lifecycle events.
+    room_tx: Sender<RoomEvent>,
 }
 
 impl Room {
     /// Create an empty room.
     pub fn new() -> Self {
-        let (audio_tx, _) = broadcast::channel(256);
+        let (room_tx, _) = broadcast::channel(256);
 
         Self {
-            next_id: Arc::new(AtomicU64::new(1)),
-            audio_tx,
+            next_id: Arc::new(AtomicU32::new(1)),
+            room_tx,
         }
     }
 
@@ -106,20 +112,37 @@ impl Room {
     fn join(&self) -> SessionRoom {
         SessionRoom {
             id: SessionId(self.next_id.fetch_add(1, Ordering::AcqRel)),
-            audio_tx: self.audio_tx.clone(),
-            audio_rx: self.audio_tx.subscribe(),
+            room_tx: self.room_tx.clone(),
+            room_rx: self.room_tx.subscribe(),
         }
     }
+}
+
+/// Event broadcast to every session in a room.
+#[derive(Debug, Clone)]
+enum RoomEvent {
+    /// A session has produced a new audio frame to be forwarded to other sessions.
+    Audio(ForwardedAudio),
+    /// A session has left and its forwarded audio should be released.
+    Left(SessionId),
 }
 
 /// Per-session view of the shared room.
 struct SessionRoom {
     /// Current session ID.
     id: SessionId,
-    /// Sender used to publish local audio.
-    audio_tx: Sender<ForwardedAudio>,
-    /// Receiver used to consume audio from other sessions.
-    audio_rx: Receiver<ForwardedAudio>,
+    /// Sender used to publish this session's room events.
+    room_tx: Sender<RoomEvent>,
+    /// Receiver used to consume room events from other sessions.
+    room_rx: Receiver<RoomEvent>,
+}
+
+impl Drop for SessionRoom {
+    fn drop(&mut self) {
+        if let Err(err) = self.room_tx.send(RoomEvent::Left(self.id)) {
+            warn!(session_id = self.id.0, ?err, "failed to send room leave event");
+        }
+    }
 }
 
 /// Select the first usable non-loopback IPv4 address from the host.
@@ -179,17 +202,32 @@ pub struct Session {
     /// Debug audio sink.
     sink: AudioSink,
     /// Sender for outgoing messages to the client WebSocket.
-    _ws_tx: mpsc::Sender<SignalMessage>,
+    signal_tx: mpsc::Sender<SignalMessage>,
     /// Receiver for incoming messages from the client WebSocket.
-    _session_rx: mpsc::Receiver<SignalMessage>,
+    signal_rx: mpsc::Receiver<SignalMessage>,
+    /// Negotiated outgoing audio slots that are not assigned to a remote speaker.
+    available_audio_mids: Vec<Mid>,
+    /// Mapping from remote speaker sessions to their outgoing audio slot.
+    remote_audio_mids: HashMap<SessionId, Mid>,
+    /// In-flight local SDP offer and the media slots that become usable after its answer.
+    pending_negotiation: Option<(SdpPendingOffer, Vec<Mid>)>,
+    /// Last ICE connection state observed from str0m.
+    connection_state: IceConnectionState,
 }
 
 impl Session {
+    /// Maximum UDP datagram size accepted for WebRTC input.
+    const BUFFER_SIZE: usize = 65535;
+
+    /// Return the room-scoped identifier for this session.
+    #[inline]
+    fn id(&self) -> SessionId { self.room.id }
+
     /// Run the session event loop until the peer disconnects or an error occurs.
     pub async fn run(mut self) {
         info!("str0m run loop started");
 
-        let mut buf = vec![0; 65535];
+        let mut buf = vec![0; Session::BUFFER_SIZE];
 
         loop {
             let timeout = match self.poll().await {
@@ -206,43 +244,75 @@ impl Session {
             }
 
             select! {
-                result = self.room.audio_rx.recv() => {
-                    match result {
-                        Ok(frame) => {
-                            self.handle_forwarded_audio(frame);
+                room_event = self.room.room_rx.recv() => {
+                    match room_event {
+                        Ok(RoomEvent::Audio(frame)) => {
+                            self.handle_forwarded_audio(frame).await;
+                        }
+                        Ok(RoomEvent::Left(origin)) => {
+                            self.release_forwarded_audio(origin);
                         }
                         Err(RecvError::Lagged(skipped)) => {
-                            warn!(skipped, "audio relay receiver lagged");
+                            warn!(session_id = *self.id(), skipped, "audio relay receiver lagged");
                         }
                         Err(RecvError::Closed) => {
-                            return;
+                            break;
                         }
                     }
                 }
-                result = self.socket.recv_from(&mut buf) => {
-                    match result {
-                        Ok((n, source)) => {
+                signal = self.signal_rx.recv() => {
+                    let Some(signal) = signal else {
+                        info!(session_id = *self.id(), "signaling session closed by client");
+                        break;
+                    };
+                    match signal {
+                        SignalMessage::Answer { sdp } => {
+                            let Some((pending, mids)) = self.pending_negotiation.take() else {
+                                warn!(session_id = *self.id(), "unexpected client answer without pending offer");
+                                continue;
+                            };
+
+                            let Ok(answer) = SdpAnswer::from_sdp_string(&sdp) else {
+                                warn!(session_id = *self.id(), "failed to parse client answer SDP");
+                                continue;
+                            };
+                            if let Err(err) = self.rtc.sdp_api().accept_answer(pending, answer) {
+                                warn!(session_id = *self.id(), ?err, "failed to accept client answer");
+                                continue;
+                            }
+
+                            debug!(session_id = *self.id(), "client answer accepted, negotiation complete");
+
+                            self.available_audio_mids.extend(mids);
+                        }
+                        SignalMessage::Offer { .. } => {}, // unreachable
+                        SignalMessage::Close => break,
+                    }
+                }
+                datagram = self.socket.recv_from(&mut buf) => {
+                    match datagram {
+                        Ok((len, addr)) => {
                             let input = Input::Receive(
                                 Instant::now(),
                                 Receive {
                                     proto: Protocol::Udp,
-                                    source,
+                                    source: addr,
                                     destination: self.socket.local_addr().unwrap(),
-                                    contents: buf[..n].try_into().unwrap(),
+                                    contents: buf[..len].try_into().unwrap(),
                                 },
                             );
                             if let Err(err) = self.rtc.handle_input(input) {
                                 error!(?err, "str0m handle_input error");
-                                return;
+                                break;
                             }
                         }
                         Err(err) => {
                             error!(?err, "UDP recv error");
-                            return;
+                            break;
                         }
                     }
                 }
-                _ = tokio::time::sleep(sleep) => {
+                _ = time::sleep(sleep) => {
                     self.rtc.handle_input(Input::Timeout(Instant::now())).unwrap();
                 }
             }
@@ -252,9 +322,9 @@ impl Session {
     /// Poll str0m once and perform any requested I/O.
     async fn poll(&mut self) -> Loop {
         match self.rtc.poll_output() {
-            Ok(Output::Timeout(v)) => Loop::Timeout(v),
-            Ok(Output::Transmit(v)) => {
-                if let Err(err) = self.socket.send_to(&v.contents, v.destination).await {
+            Ok(Output::Timeout(i)) => Loop::Timeout(i),
+            Ok(Output::Transmit(t)) => {
+                if let Err(err) = self.socket.send_to(&t.contents, t.destination).await {
                     warn!(?err, "UDP send error");
                 }
                 Loop::Continue
@@ -271,43 +341,66 @@ impl Session {
     fn handle_event(&mut self, event: Event) -> Loop {
         match event {
             Event::Connected => {
-                info!("WebRTC peer connected");
+                info!(session_id = *self.id(), "WebRTC peer connected");
             },
             Event::IceConnectionStateChange(IceConnectionState::Disconnected) => {
-                info!("ICE disconnected, ending run loop");
+                info!(session_id = *self.id(), "ICE disconnected, ending run loop");
                 return Loop::Done;
             },
             Event::IceConnectionStateChange(state) => {
-                info!(?state, "ICE connection state change");
+                info!(session_id = *self.id(), ?state, "ICE connection state change");
+                self.connection_state = state;
             },
             Event::MediaAdded(ma) => {
-                info!(mid = ?ma.mid, kind = ?ma.kind, "media added");
+                info!(session_id = *self.id(), mid = ?ma.mid, kind = ?ma.kind, "media added");
+                if ma.kind == MediaKind::Audio && ma.direction.is_sending() {
+                    self.available_audio_mids.push(ma.mid);
+                }
             },
             Event::MediaData(data) => {
                 self.sink.handle_frame(&data);
-                if let Err(err) = self.room.audio_tx.send(ForwardedAudio::new(self.room.id, data)) {
-                    warn!(?err, "audio relay has no receivers");
+                if let Err(err) = self
+                    .room
+                    .room_tx
+                    .send(RoomEvent::Audio(ForwardedAudio::new(self.room.id, data)))
+                {
+                    warn!(session_id = *self.id(), ?err, "audio relay has no receivers");
                 }
             },
-            Event::SenderFeedback(_) => {},
-            _ => debug!(?event, "unhandled event"),
+            Event::SenderFeedback(_) | Event::StreamPaused(_) => {},
+            _ => debug!(session_id = *self.id(), ?event, "unhandled event"),
         };
         Loop::Continue
     }
 
     /// Write audio received from another session to this WebRTC peer.
-    fn handle_forwarded_audio(&mut self, frame: ForwardedAudio) {
+    async fn handle_forwarded_audio(&mut self, frame: ForwardedAudio) {
+        if !self.connection_state.is_connected() {
+            return;
+        }
+
         if frame.origin == self.room.id {
             return;
         }
 
-        let Some(writer) = self.rtc.writer(frame.mid) else {
-            warn!(mid = ?frame.mid, "no writer for forwarded audio");
+        let Some(mid) = self.forwarded_audio_mid(frame.origin) else {
+            #[cfg(debug_assertions)]
+            debug!(session_id = *self.id(), ?frame.origin, "no available media slot for forwarded audio");
+            self.request_negotiation().await;
+            return;
+        };
+
+        let Some(writer) = self.rtc.writer(mid) else {
+            warn!(session_id = *self.id(), ?mid, "no writer for forwarded audio");
             return;
         };
 
         let Some(pt) = writer.match_params(frame.params) else {
-            warn!(mid = ?frame.mid, "no matching payload type for forwarded audio");
+            warn!(
+                session_id = *self.id(),
+                ?mid,
+                "no matching payload type for forwarded audio"
+            );
             return;
         };
 
@@ -316,8 +409,65 @@ impl Session {
                 .start_of_talkspurt(frame.start_of_talkspurt)
                 .write(pt, frame.network_time, frame.time, frame.data)
         {
-            warn!(?err, "failed to write forwarded audio");
+            warn!(session_id = *self.id(), ?err, "failed to write forwarded audio");
         }
+    }
+
+    /// Return or allocate the outgoing media slot for a remote speaker.
+    fn forwarded_audio_mid(&mut self, origin: SessionId) -> Option<Mid> {
+        if let Some(mid) = self.remote_audio_mids.get(&origin) {
+            return Some(*mid);
+        }
+
+        let mid = self.available_audio_mids.pop()?;
+        self.remote_audio_mids.insert(origin, mid);
+        Some(mid)
+    }
+
+    /// Release the outgoing media slot used for a departed speaker.
+    fn release_forwarded_audio(&mut self, origin: SessionId) {
+        if let Some(mid) = self.remote_audio_mids.remove(&origin) {
+            self.available_audio_mids.push(mid);
+        }
+    }
+
+    /// Current number of remote speakers this peer can receive.
+    fn remote_audio_capacity(&self) -> usize { self.remote_audio_mids.len() + self.available_audio_mids.len() }
+
+    /// Request more outgoing audio slots from the browser peer.
+    async fn request_negotiation(&mut self) {
+        if self.pending_negotiation.is_some() {
+            return;
+        }
+
+        let current = self.remote_audio_capacity();
+        let desired = current.max(1).saturating_mul(2);
+
+        if desired <= current {
+            return;
+        }
+
+        let mut changes = self.rtc.sdp_api();
+        let mut mids = Vec::with_capacity(desired - current);
+
+        for _ in current..desired {
+            mids.push(changes.add_media(MediaKind::Audio, Direction::SendOnly, None, None, None));
+        }
+
+        let Some((offer, pending)) = changes.apply() else {
+            return;
+        };
+
+        let offer = SignalMessage::Offer {
+            sdp: offer.to_sdp_string(),
+        };
+        if self.signal_tx.send(offer).await.is_err() {
+            return;
+        }
+
+        self.pending_negotiation = Some((pending, mids));
+
+        debug!(current, desired, session_id = *self.id(), "requested renegotiation");
     }
 }
 
@@ -356,20 +506,24 @@ impl SessionBuilder {
     /// Join the room and finish the session with an outgoing signaling sender.
     pub fn build(
         self,
-        ws_tx: mpsc::Sender<SignalMessage>,
-        session_rx: mpsc::Receiver<SignalMessage>,
+        signal_tx: mpsc::Sender<SignalMessage>,
+        signal_rx: mpsc::Receiver<SignalMessage>,
         room: &Room,
     ) -> Session {
-        let session_room = room.join();
-        let id = session_room.id.0;
+        let room = room.join();
+        let id = room.id.0;
 
         Session {
             rtc: self.rtc,
             socket: self.socket,
-            room: session_room,
+            room,
             sink: AudioSink::new(id),
-            _ws_tx: ws_tx,
-            _session_rx: session_rx,
+            signal_tx,
+            signal_rx,
+            available_audio_mids: Vec::new(),
+            remote_audio_mids: HashMap::new(),
+            pending_negotiation: None,
+            connection_state: IceConnectionState::New,
         }
     }
 }

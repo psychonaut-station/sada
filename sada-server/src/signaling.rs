@@ -29,22 +29,19 @@ pub struct AppState {
 
 /// Message exchanged over the signaling WebSocket.
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum SignalMessage {
-    /// SDP offer sent by a WebRTC client.
-    #[serde(rename = "offer")]
+    /// SDP offer sent by a client when joining, or by the server during renegotiation.
     Offer {
         /// Session description payload.
         sdp: String,
     },
-    /// SDP answer sent after accepting an offer.
-    #[serde(rename = "answer")]
+    /// SDP answer sent after accepting an offer from the other side.
     Answer {
         /// Session description payload.
         sdp: String,
     },
     /// Request to close the signaling session.
-    #[serde(rename = "close")]
     Close,
 }
 
@@ -144,10 +141,20 @@ async fn handle_incoming(
             tokio::spawn(session.build(ws_tx, ssn_rx, &state.room).run());
         },
         SignalMessage::Answer { .. } => {
-            warn!("unexpected Answer from client (ignored)");
+            if let Some(tx) = session_tx {
+                if let Err(err) = tx.send(signal).await {
+                    warn!(?err, "failed to forward answer to session");
+                    return ControlFlow::Break(());
+                }
+            } else {
+                warn!("received Answer before Offer (ignored)");
+            }
         },
         SignalMessage::Close => {
             info!("client sent close");
+            if let Some(tx) = session_tx {
+                let _ = tx.send(signal).await;
+            }
             return ControlFlow::Break(());
         },
     };

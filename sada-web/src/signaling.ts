@@ -1,6 +1,6 @@
 export type ClientMessage =
     | { type: "offer"; sdp: string }
-    | { type: "answer"; sdp: string; negotiationId: number }
+    | { type: "answer"; sdp: string }
     | { type: "close" };
 
 export type TrackMapEntry = {
@@ -10,7 +10,7 @@ export type TrackMapEntry = {
 
 export type ServerMessage =
     | { type: "answer"; sdp: string }
-    | { type: "offer"; sdp: string; negotiationId: number }
+    | { type: "offer"; sdp: string }
     | { type: "track_map"; tracks: TrackMapEntry[] }
     | { type: "close" };
 
@@ -102,9 +102,8 @@ export class SignalingClient {
             }
             case "offer": {
                 const sdp = str("sdp");
-                const negotiationId = obj.negotiationId;
-                if (!sdp || typeof negotiationId !== "number") return null;
-                return { type: "offer", sdp, negotiationId };
+                if (!sdp) return null;
+                return { type: "offer", sdp };
             }
             case "track_map": {
                 if (!Array.isArray(obj.tracks)) return null;
