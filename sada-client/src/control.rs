@@ -1,13 +1,8 @@
 //! Unix socket control client used by exported functions.
 
-use std::{
-    cell::RefCell,
-    io::{Read, Write},
-    os::unix::net::UnixStream,
-    time::Duration,
-};
+use std::{cell::RefCell, os::unix::net::UnixStream, time::Duration};
 
-use sada_common::{ControlFrameBuffer, ControlRequest, ControlResponse, MAX_CONTROL_FRAME_LEN};
+use sada_common::{ControlFrame as _, ControlFrameBuffer, ControlRequest, ControlResponse};
 
 thread_local! {
     /// Connected control socket state.
@@ -31,37 +26,14 @@ impl ControlState {
         }
     }
 
-    /// Write one length-prefixed postcard control frame.
-    fn write_frame<T: serde::Serialize>(&mut self, value: &T) -> Result<(), Box<dyn std::error::Error>> {
-        let payload = self.buffer.encode(value)?;
-
-        self.stream.write_all(&u32::try_from(payload.len())?.to_le_bytes())?;
-        self.stream.write_all(payload)?;
-
-        self.stream.flush()?;
-
-        Ok(())
-    }
-
-    /// Read one length-prefixed postcard control frame.
-    fn read_frame(&mut self) -> Result<ControlResponse, Box<dyn std::error::Error>> {
-        let mut len = [0; size_of::<u32>()];
-        self.stream.read_exact(&mut len)?;
-
-        let len = u32::from_le_bytes(len) as usize;
-        if len > MAX_CONTROL_FRAME_LEN {
-            return Err(format!("control frame too large: {len} bytes").into());
-        }
-
-        self.stream.read_exact(self.buffer.payload_mut(len))?;
-
-        Ok(self.buffer.decode(len)?)
-    }
-
     /// Perform the wire-format request/response exchange.
     fn request(&mut self, request: &ControlRequest) -> Result<ControlResponse, Box<dyn std::error::Error>> {
-        self.write_frame(request)?;
-        self.read_frame()
+        self.buffer.write(&mut self.stream, request)?;
+        match self.buffer.read(&mut self.stream) {
+            Ok(Some(response)) => Ok(response),
+            Ok(None) => Err("unexpected EOF while reading control response".into()),
+            Err(err) => Err(format!("failed to read control response: {err}").into()),
+        }
     }
 }
 

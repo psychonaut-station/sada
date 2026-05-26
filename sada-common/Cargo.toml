@@ -9,3 +9,9 @@ workspace = true
 [dependencies]
 postcard.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, optional = true }
+
+[features]
+default = []
+async = ["tokio"]
