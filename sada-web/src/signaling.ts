@@ -36,9 +36,7 @@ export class SignalingClient {
                 resolve();
             };
             webSocket.onmessage = (ev) => {
-                const msg = this.onServerMessage(
-                    typeof ev.data === "string" ? ev.data : "",
-                );
+                const msg = this.onServerMessage(typeof ev.data === "string" ? ev.data : "");
                 if (!msg) {
                     console.error("Failed to parse signaling message", ev.data);
                     return;
@@ -64,10 +62,8 @@ export class SignalingClient {
     close(): void {
         if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
             try {
-                this.webSocket.send(
-                    JSON.stringify({ type: "close" } satisfies ClientMessage),
-                );
-            } catch { }
+                this.webSocket.send(JSON.stringify({ type: "close" } satisfies ClientMessage));
+            } catch {}
         }
         this.webSocket?.close();
         this.webSocket = null;

@@ -2,14 +2,38 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
   pull_request:
-    branches: [master]
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  lint:
+    name: Lint Workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check formatting and linting
+        run: bun run check
+
   rust:
     name: Rust
     runs-on: ubuntu-latest
@@ -19,7 +43,13 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rustfmt, clippy
+          components: clippy, rustfmt
+          targets: i686-unknown-linux-gnu
+
+      - name: Install 32-bit linker dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -28,16 +58,19 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Build
-        run: cargo build --workspace
+      - name: Build workspace
+        run: cargo build --workspace --locked --all-features
+
+      - name: Build client (32-bit)
+        run: cargo build -p sada-client --target i686-unknown-linux-gnu --locked
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked --all-features
 
-  sada-web:
-    name: sada-web
+  web:
+    name: Web
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -50,8 +83,5 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Lint (biome check)
-        run: bun run check
-
-      - name: Build
+      - name: Type-check and build
         run: bun run build

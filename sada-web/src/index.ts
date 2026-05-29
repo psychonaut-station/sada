@@ -158,11 +158,7 @@ export class Sada extends LitElement {
             onConnectionState: (state) => {
                 if (state === "connected") {
                     this.connectionState = "connected";
-                } else if (
-                    state === "disconnected" ||
-                    state === "failed" ||
-                    state === "closed"
-                ) {
+                } else if (state === "disconnected" || state === "failed" || state === "closed") {
                     this.cleanup();
                 }
             },
@@ -186,9 +182,7 @@ export class Sada extends LitElement {
             this.remoteAudio.srcObject = stream;
         }
 
-        this.remoteAudio
-            .play()
-            .catch((e) => console.error("remote audio play failed", e));
+        this.remoteAudio.play().catch((e) => console.error("remote audio play failed", e));
     }
 
     private onMessage(message: ServerMessage): void {
