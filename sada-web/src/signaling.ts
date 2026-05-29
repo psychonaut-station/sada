@@ -1,6 +1,12 @@
-export type ClientMessage = { type: "offer"; sdp: string } | { type: "close" };
+export type ClientMessage =
+    | { type: "offer"; sdp: string }
+    | { type: "answer"; sdp: string }
+    | { type: "close" };
 
-export type ServerMessage = { type: "answer"; sdp: string } | { type: "close" };
+export type ServerMessage =
+    | { type: "answer"; sdp: string }
+    | { type: "offer"; sdp: string }
+    | { type: "close" };
 
 export type SignalingHandlers = {
     onServerMessage: (msg: ServerMessage) => void;
@@ -91,6 +97,11 @@ export class SignalingClient {
                 const sdp = str("sdp");
                 if (!sdp) return null;
                 return { type: "answer", sdp };
+            }
+            case "offer": {
+                const sdp = str("sdp");
+                if (!sdp) return null;
+                return { type: "offer", sdp };
             }
             case "close":
                 return { type: "close" };

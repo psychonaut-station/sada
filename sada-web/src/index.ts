@@ -198,14 +198,24 @@ export class Sada extends LitElement {
                     console.error("applyAnswer failed", e);
                 });
                 break;
+            case "offer":
+                console.debug("received negotiation offer", message);
+                this.rtc?.applyOffer(message.sdp).catch((e) => {
+                    console.error("applyOffer failed", e);
+                    this.cleanup();
+                });
+                break;
+            case "close":
+                this.cleanup();
+                break;
         }
     }
 
     private cleanup(): void {
-        this.rtc?.hangup();
-        this.rtc = undefined;
         this.signalling?.close();
         this.signalling = undefined;
+        this.rtc?.hangup();
+        this.rtc = undefined;
         if (this.remoteAudio) {
             this.remoteAudio.srcObject = null;
         }
