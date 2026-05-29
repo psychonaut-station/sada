@@ -6,16 +6,11 @@ use std::{
     sync::Arc,
 };
 
-use sada_common::{ControlFrameBuffer, ControlRequest, ControlResponse, MAX_CONTROL_FRAME_LEN};
+use sada_common::{AsyncControlFrame as _, ControlFrameBuffer, ControlRequest, ControlResponse};
 use thiserror::Error;
 use tokio::{
     fs,
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        UnixListener,
-        UnixStream,
-        unix::{OwnedReadHalf, OwnedWriteHalf},
-    },
+    net::{UnixListener, UnixStream},
     sync::Semaphore,
 };
 
@@ -61,55 +56,17 @@ async fn handle_connection(stream: UnixStream) -> Result<()> {
     let (mut reader, mut writer) = stream.into_split();
     let mut buffer = ControlFrameBuffer::new();
 
-    while let Some(len) = read_frame(&mut reader, &mut buffer).await? {
-        let response = match buffer.decode(len) {
-            Ok(request) => handle_request(request),
+    loop {
+        let response = match buffer.read(&mut reader).await {
+            Ok(Some(req)) => handle_request(req),
+            Ok(None) => break, // eof
             Err(err) => ControlResponse::Error {
                 message: format!("invalid request: {err}"),
             },
         };
-
-        write_frame(&mut writer, &mut buffer, &response).await?;
+        buffer.write(&mut writer, &response).await?;
     }
 
-    Ok(())
-}
-
-/// Read one length-prefixed postcard control frame.
-async fn read_frame(reader: &mut OwnedReadHalf, buffer: &mut ControlFrameBuffer) -> Result<Option<usize>> {
-    let mut len = [0; size_of::<u32>()];
-    match reader.read_exact(&mut len).await {
-        Ok(_) => {},
-        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(source) => return Err(Error::ReadFrameLength(source)),
-    }
-
-    let len = u32::from_le_bytes(len) as usize;
-    if len > MAX_CONTROL_FRAME_LEN {
-        return Err(Error::ControlFrameTooLarge(len));
-    }
-
-    reader
-        .read_exact(buffer.payload_mut(len))
-        .await
-        .map_err(Error::ReadFramePayload)?;
-    Ok(Some(len))
-}
-
-/// Write one length-prefixed postcard control frame.
-async fn write_frame<T: serde::Serialize>(
-    writer: &mut OwnedWriteHalf,
-    buffer: &mut ControlFrameBuffer,
-    value: &T,
-) -> Result<()> {
-    let payload = buffer.encode(value).map_err(Error::EncodeFrame)?;
-    let len = u32::try_from(payload.len()).map_err(Error::EncodeFrameTooLarge)?;
-
-    writer
-        .write_all(&len.to_le_bytes())
-        .await
-        .map_err(Error::WriteFrameLength)?;
-    writer.write_all(payload).await.map_err(Error::WriteFramePayload)?;
     Ok(())
 }
 
@@ -141,25 +98,7 @@ pub enum Error {
     /// The client limiter semaphore was closed.
     #[error("control socket semaphore closed")]
     SemaphoreClosed(#[source] tokio::sync::AcquireError),
-    /// The control frame length prefix could not be read.
-    #[error("failed to read control frame length")]
-    ReadFrameLength(#[source] io::Error),
-    /// The incoming frame exceeded the maximum protocol size.
-    #[error("control frame too large: {0} bytes")]
-    ControlFrameTooLarge(usize),
-    /// The control frame payload could not be read.
-    #[error("failed to read control frame payload")]
-    ReadFramePayload(#[source] io::Error),
-    /// The response could not be encoded into the control protocol.
-    #[error("failed to encode control frame")]
-    EncodeFrame(#[source] postcard::Error),
-    /// The encoded response was too large for the length prefix.
-    #[error("control frame too large to encode")]
-    EncodeFrameTooLarge(#[source] std::num::TryFromIntError),
-    /// The control frame length prefix could not be written.
-    #[error("failed to write control frame length")]
-    WriteFrameLength(#[source] io::Error),
-    /// The control frame payload could not be written.
-    #[error("failed to write control frame payload")]
-    WriteFramePayload(#[source] io::Error),
+    /// Shared control frame protocol error.
+    #[error(transparent)]
+    Common(#[from] sada_common::Error),
 }
