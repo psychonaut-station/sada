@@ -228,14 +228,20 @@ export class Sada extends LitElement {
         switch (this.connectionState) {
             case "disconnected":
                 controls = html`
-                    <button class="btn-connect" @click="${() => this.tryConnect()}">
+                    <button
+                        class="btn-connect"
+                        @click="${() => this.tryConnect()}"
+                    >
                         Connect
                     </button>
                 `;
                 break;
             case "connecting":
                 controls = html`
-                    <button class="btn-disconnect" @click="${() => this.cleanup()}">
+                    <button
+                        class="btn-disconnect"
+                        @click="${() => this.cleanup()}"
+                    >
                         Cancel
                     </button>
                 `;
@@ -248,7 +254,10 @@ export class Sada extends LitElement {
                     >
                         ${this.muted ? "Unmute" : "Mute"}
                     </button>
-                    <button class="btn-disconnect" @click="${() => this.cleanup()}">
+                    <button
+                        class="btn-disconnect"
+                        @click="${() => this.cleanup()}"
+                    >
                         Disconnect
                     </button>
                 `;
@@ -267,9 +276,7 @@ export class Sada extends LitElement {
                     ${this.connectionState}
                 </span>
 
-                <div class="controls">
-                    ${controls}
-                </div>
+                <div class="controls">${controls}</div>
             </div>
         `;
     }

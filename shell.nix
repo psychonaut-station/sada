@@ -11,6 +11,7 @@ pkgs.mkShell {
   nativeBuildInputs = [
     toolchain
     pkgs.pkg-config
+    pkgs.nodejs
     pkgs.bun
     pkgs.opus
     pkgs.cmake
